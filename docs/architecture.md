@@ -40,7 +40,7 @@ sequenceDiagram
 | `server/lib/turn-controller.js`    | ASR 聚合、LLM 轮次、分句 TTS、`resp_id`、打断、Trace   |
 | `server/lib/ark-agent.js`          | Ark Chat Completions 流式调用                          |
 | `server/lib/tts-client.js`         | SeedTTS 3.0 JSONL 流式 PCM + 2.0 兼容                   |
-| `server/lib/inline-tags.js`        | 官方情感标签白名单、字幕标签清洗                       |
+| `server/lib/inline-tags.js`        | 官方标签清单、系统提示词注入、字幕标签清洗             |
 | `server/lib/sentence-segmenter.js` | 中英文流式分句，降低首包延迟                           |
 
 ## 与官方 Gateway 接入步骤的对应关系
@@ -218,5 +218,8 @@ POST https://voice.cn-beijing.volces.com/api/v3/text-to-speech/{voice_id}/stream
 可定位到具体请求。
 
 情感标签来自官方单向流式接口支持的 82 个标签，标签本身不会被朗读。
+服务端在 SeedTTS 3.0 会话中把完整清单注入系统提示词，分为 54 个
+情绪/语气控制标签和 28 个副语言拟声标签，并约束模型按情绪转折选择、
+每次回复最多 3 个且不得相邻连排。
 `stripInlineTags()` 只清洗白名单标签，保留普通英文方括号文本，并处理流式
 输出中只到达一半的标签。

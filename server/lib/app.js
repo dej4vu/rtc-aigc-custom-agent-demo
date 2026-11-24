@@ -18,6 +18,7 @@ const { BotConfigResolver } = require("./bot-config");
 const { SessionStore } = require("./session-store");
 const { createRtcToken } = require("./rtc-token");
 const { configIssues, publicConfigStatus } = require("./config");
+const { appendInlineTagGuide } = require("./inline-tags");
 
 function loadScenes(sceneDir) {
   const scenes = {};
@@ -356,11 +357,15 @@ function createApp({
           warn: (...args) => log.warn?.(`[CALL ${call.id}]`, ...args),
           error: (...args) => log.error?.(`[CALL ${call.id}]`, ...args),
         };
+        const systemPrompt =
+          config.tts.apiVersion === "3.0"
+            ? appendInlineTagGuide(scene.systemPrompt)
+            : scene.systemPrompt;
         const controller = new TurnController({
           sessionId: call.id,
           agentUserId,
           humanUserId: userId,
-          systemPrompt: scene.systemPrompt,
+          systemPrompt,
           welcomeMessage: scene.welcomeMessage,
           agent: makeAgent(config),
           tts: makeTts(config),

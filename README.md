@@ -33,7 +33,7 @@
 │   ├── lib/turn-controller.js
 │   ├── lib/ark-agent.js    # Ark 流式 LLM
 │   ├── lib/tts-client.js   # SeedTTS 3.0 流式 PCM + 内联情感标签
-│   ├── lib/inline-tags.js  # 官方情感标签白名单与字幕清洗
+│   ├── lib/inline-tags.js  # 官方标签清单、提示词注入与字幕清洗
 │   └── scenes/default.json # 人设、欢迎语、推荐问题
 ├── web/                    # 官方 rtc-aigc-demo 前端改造
 └── docs/                   # 架构、验证记录、排障
@@ -184,7 +184,8 @@ Content-Type: application/json
 `assistant.audio.delta` 回传 RTC。
 
 默认人设「绯绯」使用撒娇学妹 3.0 作为底声，并通过
-`TTS_INSTRUCTIONS` 和官方内联标签叠加病娇感：
+`TTS_INSTRUCTIONS` 和[官方内联标签](https://docs.volcengine.com/docs/doubao-voice/audio-emotion-tag-inline-best-practices?lang=zh)
+叠加病娇感：
 
 ```text
 [happy] 你终于来啦。[soft] 我还以为……你今天不会找我了呢。
@@ -192,9 +193,11 @@ Content-Type: application/json
 
 实现约定：
 
+- SeedTTS 3.0 会收到官方全部 82 个标签清单：54 个情绪/语气控制标签和 28 个副语言拟声标签。
 - LLM 输出保留 `[happy]`、`[soft]`、`[whispering]` 等官方英文标签，原样送给 TTS。
 - 字幕和历史消息会去掉标签，用户不会看到标签文本。
-- 标签只允许来自官方 82 个标签集合；每次情绪转折最多一个，避免堆叠。
+- 提示词要求按情绪转折选择标签，一次回复通常 1-2 个、最多 3 个；同一位置只能有一个标签，禁止 `[a][b]` 连排。
+- 标签只允许来自官方 82 个标签集合，其他方括号文本不会被当作标签清洗。
 - 病娇人格只做亲密关系里的吃醋、撒娇和占有欲表达，不生成威胁、控制现实行动、自伤或伤害他人的内容。
 
 账号未授权某个 3.0 音色时接口会返回 403。可在火山语音控制台开通后，
@@ -258,7 +261,7 @@ Microsoft Edge 158 访问测试环境 <https://tapi.tuban.zone/rtc-demo/> 验证
 - 显式挂断后 `activeCalls` 归零
 - MMPG 连接断开后服务端自动清理活动 call
 
-服务端 34 项测试、前端 14 项测试全部通过，前端生产构建通过。
+服务端 35 项测试、前端 14 项测试全部通过，前端生产构建通过。
 
 详细记录见 [docs/verification.md](docs/verification.md)。
 
