@@ -1,0 +1,11 @@
+{
+  "name": "rtc-aigc-demo",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n server,web \"yarn --cwd server dev\" \"yarn --cwd web start\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "packageManager": "yarn@1.22.22"
+}

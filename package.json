@@ -1,0 +1,19 @@
+{
+  "name": "rtc-aigc-custom-agent-demo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "BSD-3-Clause",
+  "description": "RTC + MMPG + self-hosted Agent + Ark + TTS demo",
+  "scripts": {
+    "dev": "concurrently -k -n server,web \"yarn --cwd server dev\" \"yarn --cwd web start\"",
+    "server": "yarn --cwd server dev",
+    "web": "yarn --cwd web start",
+    "test": "yarn --cwd server test && yarn --cwd web test --runInBand",
+    "preflight": "yarn --cwd server preflight",
+    "probe": "yarn --cwd server probe"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "packageManager": "yarn@1.22.22"
+}
