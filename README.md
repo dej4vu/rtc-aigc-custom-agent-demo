@@ -14,6 +14,13 @@
 
 前端复用官方 Demo 的进房、设备管理、字幕和 UI；本仓库新增 `server/`，负责 RTC Token、MMPG WebSocket、ASR 事件、LLM、TTS、轮次、打断和 Trace。
 
+## 参考来源
+
+`web/` 由火山引擎官方开源项目
+[rtc-aigc-demo](https://github.com/volcengine/rtc-aigc-demo) 改造而来。
+本仓库只保留实际运行所需的改造后代码，不再附带官方 Demo 的完整源码副本，
+避免与运行入口混淆。需要对照官方实现时，请直接访问上游仓库。
+
 ## 目录
 
 ```text
