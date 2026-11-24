@@ -39,10 +39,9 @@
 - Yarn 1.22
 - 可访问火山引擎公网
 
-安装依赖：
+在仓库根目录安装依赖：
 
 ```bash
-cd /Users/dejavu/workspace/github.com/volcengine/rtc-aigc-custom-agent-demo
 yarn install
 yarn --cwd server install
 yarn --cwd web install
