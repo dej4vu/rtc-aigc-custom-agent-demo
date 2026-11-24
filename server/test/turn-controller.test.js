@@ -56,9 +56,14 @@ test("streams LLM text into sentence TTS and closes one resp_id", async () => {
   });
   await donePromise;
 
-  const audio = mmpgEvents.filter((event) => event.type === "assistant.audio.delta");
+  const audio = mmpgEvents.filter(
+    (event) => event.type === "assistant.audio.delta"
+  );
   assert.ok(audio.length >= 2);
-  assert.equal(audio.every((event) => event.resp_id === 1), true);
+  assert.equal(
+    audio.every((event) => event.resp_id === 1),
+    true
+  );
   assert.equal(audio.at(-1).done, true);
   const merged = Buffer.concat(
     audio.map((event) => Buffer.from(event.payload, "base64"))
@@ -105,7 +110,9 @@ test("barge-in cancels current audio and starts a higher resp_id", async () => {
     type: "user.audio.transcription.started",
     conv_id: "conv-2",
   });
-  assert.ok(mmpgEvents.some((event) => event.type === "assistant.audio.cancel"));
+  assert.ok(
+    mmpgEvents.some((event) => event.type === "assistant.audio.cancel")
+  );
   assert.equal(controller.status, "INTERRUPTED");
 
   await controller.handleEvent({
@@ -119,4 +126,76 @@ test("barge-in cancels current audio and starts a higher resp_id", async () => {
     .at(-1);
   assert.ok(laterAudio.resp_id > firstResp);
   assert.equal(call >= 2, true);
+});
+
+test("keeps inline tags for TTS but strips them from subtitles and history", async () => {
+  const ttsRequests = [];
+  const { controller, custom, donePromise } = makeController({
+    systemPrompt: "你是病娇女友",
+    agent: {
+      async reply({ onDelta }) {
+        await onDelta("[happy] 你终于回来啦。", { firstTokenLatencyMs: 8 });
+        await onDelta("[soft] 今天有没有偷偷想我？", {
+          firstTokenLatencyMs: 8,
+        });
+        return { text: "[happy] 你终于回来啦。[soft] 今天有没有偷偷想我？" };
+      },
+    },
+    tts: {
+      async synthesize(text, { onChunk }) {
+        ttsRequests.push(text);
+        await onChunk(Buffer.from([1]));
+        return { chunks: 1 };
+      },
+    },
+  });
+
+  await controller.handleEvent({
+    type: "user.audio.transcription.done",
+    conv_id: "conv-1",
+    transcript: "我回来了",
+  });
+  await donePromise;
+
+  assert.ok(ttsRequests.some((text) => text.includes("[happy]")));
+  const subtitles = custom
+    .filter((item) => item.type === "subv")
+    .flatMap((item) => item.value.data)
+    .map((item) => item.text)
+    .join("");
+  assert.equal(subtitles.includes("[happy]"), false);
+  assert.equal(subtitles.includes("[soft]"), false);
+  assert.ok(subtitles.includes("你终于回来啦。"));
+  const assistant = controller.messages.find(
+    (message) => message.role === "assistant"
+  );
+  assert.equal(assistant.content.includes("[happy]"), false);
+  assert.equal(assistant.content.includes("[soft]"), false);
+});
+
+test("strips tags from the welcome subtitle but speaks the original text", async () => {
+  const ttsRequests = [];
+  const { controller, custom } = makeController({
+    welcomeMessage: "[happy] 你终于来啦。[soft] 我还以为你不会找我了呢。",
+    tts: {
+      async synthesize(text, { onChunk }) {
+        ttsRequests.push(text);
+        await onChunk(Buffer.from([1]));
+        return { chunks: 1 };
+      },
+    },
+  });
+
+  await controller.handleEvent({
+    type: "user.message",
+    payload: JSON.stringify({ type: "client.ready" }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const welcome = custom
+    .filter((item) => item.type === "subv")
+    .flatMap((item) => item.value.data)
+    .find((item) => item.userId === "agent-1");
+  assert.equal(welcome.text, "你终于来啦。我还以为你不会找我了呢。");
+  assert.ok(ttsRequests.some((text) => text.includes("[happy]")));
 });

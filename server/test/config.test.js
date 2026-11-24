@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildConfig, configIssues, publicConfigStatus } = require("../lib/config");
+const {
+  buildConfig,
+  configIssues,
+  publicConfigStatus,
+} = require("../lib/config");
 
 const baseEnv = {
   RTC_APP_ID: "app-id",
@@ -93,4 +97,49 @@ test("accepts an ASR API key without the legacy AppId pair", () => {
   });
   assert.deepEqual(configIssues(config), []);
   assert.equal(config.asr.apiKey, "speech-api-key");
+});
+
+test("defaults to SeedTTS 3.0 with the yandere companion voice", () => {
+  const config = buildConfig(baseEnv);
+  assert.equal(config.tts.apiVersion, "3.0");
+  assert.equal(config.tts.modelId, "doubao-seed-tts-3.0");
+  assert.equal(config.tts.languageCode, "zh");
+  assert.equal(
+    config.tts.speaker,
+    "multi_female_sajiaoxuemei_v3_uranus_bigtts"
+  );
+  assert.deepEqual(config.tts.instructions, [
+    "甜软、亲密、轻声撒娇，表面温柔，藏着一点占有欲和危险感",
+  ]);
+  assert.equal(publicConfigStatus(config).tts.apiVersion, "3.0");
+  assert.equal(publicConfigStatus(config).tts.instructionCount, 1);
+});
+
+test("parses TTS instructions as a JSON string array", () => {
+  const config = buildConfig({
+    ...baseEnv,
+    TTS_INSTRUCTIONS: '[" 甜而亲密 ","轻声撒娇"]',
+    TTS_SPEED: "0.94",
+    TTS_PITCH: "1",
+  });
+  assert.deepEqual(config.tts.instructions, ["甜而亲密", "轻声撒娇"]);
+  assert.equal(config.tts.speed, 0.94);
+  assert.throws(
+    () => buildConfig({ ...baseEnv, TTS_INSTRUCTIONS: "甜而亲密" }),
+    /TTS_INSTRUCTIONS/
+  );
+  assert.throws(
+    () => buildConfig({ ...baseEnv, TTS_INSTRUCTIONS: '["ok", 1]' }),
+    /TTS_INSTRUCTIONS/
+  );
+});
+
+test("supports the 2.0 fallback and rejects unknown API versions", () => {
+  const config = buildConfig({ ...baseEnv, TTS_API_VERSION: "2.0" });
+  assert.equal(config.tts.apiVersion, "2.0");
+  assert.equal(config.tts.speaker, "zh_female_vv_uranus_bigtts");
+  assert.throws(
+    () => buildConfig({ ...baseEnv, TTS_API_VERSION: "1.0" }),
+    /TTS_API_VERSION/
+  );
 });

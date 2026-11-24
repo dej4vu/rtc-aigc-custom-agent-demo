@@ -9,7 +9,7 @@ sequenceDiagram
     participant G as MMPG Gateway
     participant S as Node Agent Server
     participant L as Ark LLM
-    participant T as Doubao TTS
+    participant T as SeedTTS 3.0
 
     B->>R: joinRoom + publish mic PCM
     S->>G: WSS + session.create
@@ -20,7 +20,7 @@ sequenceDiagram
     G-->>S: user.audio.transcription.done (transcript)
     S->>L: chat.completions stream
     L-->>S: text deltas
-    S->>T: HTTP chunked TTS per sentence
+    S->>T: JSONL streaming TTS per sentence
     T-->>S: PCM chunks
     S->>G: assistant.audio.delta (base64 PCM)
     G->>R: assistant audio
@@ -39,7 +39,8 @@ sequenceDiagram
 | `server/lib/mmpg-client.js`        | WebSocket 连接、签名、事件收发、等待 `session.created` |
 | `server/lib/turn-controller.js`    | ASR 聚合、LLM 轮次、分句 TTS、`resp_id`、打断、Trace   |
 | `server/lib/ark-agent.js`          | Ark Chat Completions 流式调用                          |
-| `server/lib/tts-client.js`         | 豆包 TTS HTTP 流式 PCM                                 |
+| `server/lib/tts-client.js`         | SeedTTS 3.0 JSONL 流式 PCM + 2.0 兼容                   |
+| `server/lib/inline-tags.js`        | 官方情感标签白名单、字幕标签清洗                       |
 | `server/lib/sentence-segmenter.js` | 中英文流式分句，降低首包延迟                           |
 
 ## 与官方 Gateway 接入步骤的对应关系
@@ -154,6 +155,8 @@ string2tlv(JSON.stringify({ type: 'client.ready', value: { ... } }), 'cmsg')
 - 每次用户最终识别文本触发一个新 turn，`resp_id` 递增。
 - LLM 流式文本先按标点分句，再逐句请求 TTS。
 - 每句 TTS 的 PCM 通过 `assistant.audio.delta` 发送，最后一个包 `done=true`。
+- TTS 请求保留 `[happy]`、`[soft]` 等内联情绪标签；字幕和历史消息使用
+  `stripInlineTags()` 去掉标签。
 - 用户再次开始说话（`user.audio.transcription.started`）时：
   1. 取消当前 turn 的 AbortController
   2. 清空待合成队列
@@ -175,3 +178,45 @@ string2tlv(JSON.stringify({ type: 'client.ready', value: { ... } }), 'cmsg')
 5. 服务端收到 `client.ready` 后播放欢迎语。
 6. 用户说话 -> ASR -> LLM -> TTS -> 播放。
 7. `/session/stop`、页面卸载、或 MMPG 连接关闭时，服务端关闭 controller 和 MMPG，并清理活动 call。
+
+## TTS 3.0 接入
+
+`TtsClient` 通过 `TTS_API_VERSION` 在 2.0 与 3.0 之间切换，默认 3.0：
+
+```text
+POST https://voice.cn-beijing.volces.com/api/v3/text-to-speech/{voice_id}/streaming
+```
+
+3.0 请求头只使用 `X-Api-Key` 和 `X-Request-Id`，不使用 2.0 的
+`X-Api-Resource-Id`。请求体示例：
+
+```json
+{
+  "text": "[happy] 你终于回来啦。[soft] 今天有没有偷偷想我？",
+  "model_id": "doubao-seed-tts-3.0",
+  "language_code": "zh",
+  "output_format": { "format": "pcm", "sample_rate": 24000 },
+  "voice_settings": {
+    "speed": 0.96,
+    "pitch": 1,
+    "instructions": ["甜软、亲密、轻声撒娇，表面温柔，藏着一点占有欲和危险感"]
+  },
+  "session_id": "同一个 turn 的 UUID"
+}
+```
+
+响应是 JSONL：
+
+```json
+{"event":"ready","session_id":"..."}
+{"event":"audio","audio":"<base64 PCM>"}
+{"event":"final","is_final":true,"reason":"TTS_STREAM_FINAL_REASON_CLOSED"}
+```
+
+同一 turn 的多句 TTS 使用相同 `session_id`，便于模型保持语气和情绪连续。
+`error` 事件会抛出包含 `code`、`message`、`request_id` 的错误，前端 Trace
+可定位到具体请求。
+
+情感标签来自官方单向流式接口支持的 82 个标签，标签本身不会被朗读。
+`stripInlineTags()` 只清洗白名单标签，保留普通英文方括号文本，并处理流式
+输出中只到达一半的标签。

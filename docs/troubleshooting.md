@@ -70,10 +70,23 @@ yarn probe
 ## 有 LLM 文本但没有声音
 
 - 检查 `TTS_API_KEY` 是否有效
-- 检查 `TTS_RESOURCE_ID` 与 `TTS_SPEAKER` 是否匹配
+- 3.0 检查 `TTS_API_VERSION=3.0`、`TTS_MODEL_ID=doubao-seed-tts-3.0`
+- 3.0 检查 `TTS_SPEAKER` 是否已开通；403 `requested resource not granted`
+  通常表示账号未授权该音色
+- 3.0 不要发送 `X-Api-Resource-Id`；该请求头只属于 2.0 接口
+- 2.0 回退时检查 `TTS_RESOURCE_ID` 与 `TTS_SPEAKER` 是否匹配
 - 检查 `TTS_SAMPLE_RATE` 是否为 24000（与 `pcm24` 对应）
 - 检查 `assistant.audio.delta` 最后一个包是否 `done=true`
 - 浏览器可能拦截自动播放，点击页面后再试
+
+如果服务端日志出现 `TTS 返回无法解析的行`，确认请求打到了正确的 3.0
+`/text-to-speech/{voice_id}/streaming` 接口，并检查返回是否被代理改写。
+
+## 字幕里没有情感标签
+
+这是预期行为。标签只用于 TTS 情绪控制，`sendSubtitle()` 会在发送前调用
+`stripInlineTags()`。服务端日志中的 `[TEXT][TTS->TTS-REQUEST]` 仍能看到
+原始带标签文本。
 
 ## 没有欢迎语
 

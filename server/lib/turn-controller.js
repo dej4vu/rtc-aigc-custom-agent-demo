@@ -5,6 +5,7 @@
 
 const { v4: uuidv4 } = require("uuid");
 const { createSentenceSegmenter } = require("./sentence-segmenter");
+const { stripInlineTags } = require("./inline-tags");
 
 const STAGE = {
   UNKNOWN: 0,
@@ -193,7 +194,11 @@ class TurnController {
       }
       case "user.audio.transcription.done": {
         this.convId = event.conv_id || this.convId;
-        const transcript = (event.transcript || this.userTranscript || "").trim();
+        const transcript = (
+          event.transcript ||
+          this.userTranscript ||
+          ""
+        ).trim();
         this.userTranscript = "";
         if (!transcript) {
           this.setStatus("LISTENING");
@@ -416,7 +421,10 @@ class TurnController {
       latencyMs: this.now() - turn.startedAt,
     });
     if (turn.text.trim()) {
-      this.messages.push({ role: "assistant", content: turn.text.trim() });
+      const visibleText = stripInlineTags(turn.text);
+      if (visibleText) {
+        this.messages.push({ role: "assistant", content: visibleText });
+      }
       this.trimMessages();
       this.sendSubtitle({
         text: turn.text,
@@ -482,6 +490,7 @@ class TurnController {
       });
       await this.tts.synthesize(text, {
         signal: turn.abort.signal,
+        sessionId: turn.id,
         onChunk: async (buffer) => {
           if (turn.cancelled || turn.finished || !buffer?.length) {
             return;
@@ -612,7 +621,10 @@ class TurnController {
     try {
       await this.sendMmpgEvent("assistant.audio.cancel", {});
     } catch (error) {
-      this.logger.warn?.("[TURN] 发送 assistant.audio.cancel 失败", error.message);
+      this.logger.warn?.(
+        "[TURN] 发送 assistant.audio.cancel 失败",
+        error.message
+      );
     }
     this.setStatus("INTERRUPTED");
     this.sendStage(STAGE.INTERRUPTED, reason || "interrupted");
@@ -631,11 +643,12 @@ class TurnController {
   }
 
   sendSubtitle({ text, userId, definite, paragraph }) {
-    if (!text || !userId) {
+    const visibleText = stripInlineTags(text);
+    if (!visibleText || !userId) {
       return;
     }
     this.sendCustom("subv", {
-      data: [{ text, userId, definite, paragraph }],
+      data: [{ text: visibleText, userId, definite, paragraph }],
     });
   }
 
@@ -645,7 +658,9 @@ class TurnController {
       convId: this.convId || null,
       respId: this.activeTurn?.respId || null,
       at: new Date(this.now()).toISOString(),
-      latencyMs: Number.isFinite(latencyMs) ? Math.max(0, Math.round(latencyMs)) : null,
+      latencyMs: Number.isFinite(latencyMs)
+        ? Math.max(0, Math.round(latencyMs))
+        : null,
       detail: detail ?? null,
       status: this.status,
     };
@@ -654,7 +669,8 @@ class TurnController {
   }
 
   trimMessages() {
-    const system = this.messages[0]?.role === "system" ? [this.messages[0]] : [];
+    const system =
+      this.messages[0]?.role === "system" ? [this.messages[0]] : [];
     const rest = this.messages.filter((item) => item.role !== "system");
     this.messages = [...system, ...rest.slice(-this.historyLimit * 2)];
   }

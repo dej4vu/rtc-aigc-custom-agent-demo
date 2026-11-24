@@ -9,7 +9,10 @@ const dotenv = require("dotenv");
 const ROOT_DIR = path.resolve(__dirname, "../..");
 
 function loadEnvFiles(env = process.env) {
-  const files = [path.join(ROOT_DIR, ".env.local"), path.join(ROOT_DIR, ".env")];
+  const files = [
+    path.join(ROOT_DIR, ".env.local"),
+    path.join(ROOT_DIR, ".env"),
+  ];
   for (const file of files) {
     dotenv.config({ path: file, override: false, processEnv: env });
   }
@@ -46,6 +49,37 @@ function readBoolean(env, name, fallback = false) {
   return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
 }
 
+function readJsonStringArray(env, name, fallback) {
+  const raw = read(env, name);
+  if (!raw) {
+    return [...fallback];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${name} 必须是合法的 JSON 字符串数组`);
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some((item) => typeof item !== "string")
+  ) {
+    throw new Error(`${name} 必须是合法的 JSON 字符串数组`);
+  }
+  return parsed.map((item) => item.trim()).filter(Boolean);
+}
+
+function normalizeTtsApiVersion(value) {
+  const normalized = String(value || "3.0").trim();
+  if (normalized === "2" || normalized === "2.0") {
+    return "2.0";
+  }
+  if (normalized === "3" || normalized === "3.0") {
+    return "3.0";
+  }
+  throw new Error("TTS_API_VERSION 必须为 2.0 或 3.0");
+}
+
 function buildConfig(env = process.env) {
   const port = readNumber(env, "PORT", 3101);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -67,9 +101,14 @@ function buildConfig(env = process.env) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  const asrResourceId =
-    read(env, "ASR_RESOURCE_ID") ||
-    "";
+  const asrResourceId = read(env, "ASR_RESOURCE_ID") || "";
+  const ttsApiVersion = normalizeTtsApiVersion(
+    read(env, "TTS_API_VERSION") || "3.0"
+  );
+  const defaultTtsSpeaker =
+    ttsApiVersion === "3.0"
+      ? "multi_female_sajiaoxuemei_v3_uranus_bigtts"
+      : "zh_female_vv_uranus_bigtts";
   return {
     env,
     rootDir: ROOT_DIR,
@@ -85,7 +124,8 @@ function buildConfig(env = process.env) {
       businessId: read(env, "RTC_BUSINESS_ID"),
     },
     mmpg: {
-      url: read(env, "MMPG_URL") || "wss://interactai.volcvideo.com/api/v2/mmpg",
+      url:
+        read(env, "MMPG_URL") || "wss://interactai.volcvideo.com/api/v2/mmpg",
       region: read(env, "MMPG_REGION") || "cn-north-1",
       service: read(env, "MMPG_SERVICE") || "rtc",
       accessKeyId: read(env, "VOLC_ACCESS_KEY_ID", "VOLCENGINE_ACCESS_KEY_ID"),
@@ -115,11 +155,19 @@ function buildConfig(env = process.env) {
       maxTokens: readNumber(env, "ARK_MAX_TOKENS", 512),
     },
     tts: {
+      apiVersion: ttsApiVersion,
       apiKey: read(env, "TTS_API_KEY"),
+      modelId: read(env, "TTS_MODEL_ID") || "doubao-seed-tts-3.0",
+      languageCode: read(env, "TTS_LANGUAGE_CODE") || "zh",
       resourceId: read(env, "TTS_RESOURCE_ID") || "seed-tts-2.0",
-      speaker: read(env, "TTS_SPEAKER") || "zh_female_vv_uranus_bigtts",
+      speaker: read(env, "TTS_SPEAKER") || defaultTtsSpeaker,
       sampleRate: readNumber(env, "TTS_SAMPLE_RATE", 24000),
       format: read(env, "TTS_FORMAT") || "pcm",
+      speed: readNumber(env, "TTS_SPEED", 0.96),
+      pitch: readNumber(env, "TTS_PITCH", 1),
+      instructions: readJsonStringArray(env, "TTS_INSTRUCTIONS", [
+        "甜软、亲密、轻声撒娇，表面温柔，藏着一点占有欲和危险感",
+      ]),
     },
   };
 }
@@ -156,6 +204,15 @@ function configIssues(config) {
   }
   if (!Number.isInteger(config.tts.sampleRate) || config.tts.sampleRate <= 0) {
     issues.push("TTS_SAMPLE_RATE 必须为正整数");
+  }
+  if (!Number.isFinite(config.tts.speed) || config.tts.speed <= 0) {
+    issues.push("TTS_SPEED 必须为正数");
+  }
+  if (!Number.isFinite(config.tts.pitch) || config.tts.pitch <= 0) {
+    issues.push("TTS_PITCH 必须为正数");
+  }
+  if (config.tts.apiVersion === "3.0" && !config.tts.modelId) {
+    issues.push("缺少 TTS_MODEL_ID");
   }
   return issues;
 }
@@ -200,10 +257,16 @@ function publicConfigStatus(config) {
     },
     tts: {
       apiKey: Boolean(config.tts.apiKey),
+      apiVersion: config.tts.apiVersion,
+      modelId: config.tts.modelId,
+      languageCode: config.tts.languageCode,
       resourceId: config.tts.resourceId,
       speaker: config.tts.speaker,
       sampleRate: config.tts.sampleRate,
       format: config.tts.format,
+      speed: config.tts.speed,
+      pitch: config.tts.pitch,
+      instructionCount: config.tts.instructions.length,
     },
     logTranscripts: config.logTranscripts,
   };
