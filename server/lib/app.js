@@ -62,6 +62,7 @@ async function serveStatic(ctx, config) {
     gzip: false,
     brotli: false,
   };
+  const isIndex = safePath === "index.html";
   try {
     await KoaSend(ctx, safePath, {
       ...sendOptions,
@@ -69,9 +70,13 @@ async function serveStatic(ctx, config) {
       maxage: 1000 * 60 * 60 * 12,
       immutable: false,
     });
+    if (isIndex) {
+      ctx.set("Cache-Control", "no-store");
+    }
   } catch (error) {
     if (error.code === "ENOENT") {
       await KoaSend(ctx, "index.html", sendOptions);
+      ctx.set("Cache-Control", "no-store");
       return;
     }
     throw error;

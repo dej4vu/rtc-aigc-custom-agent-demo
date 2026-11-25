@@ -107,6 +107,7 @@ test("serves the fresh index instead of a stale gzip sidecar", async () => {
       });
       const body = await res.text();
       assert.equal(res.status, 200);
+      assert.equal(res.headers.get("cache-control"), "no-store");
       assert.match(body, /NEW BUILD/);
       assert.doesNotMatch(body, /OLD BUILD/);
     }, staticConfig);
