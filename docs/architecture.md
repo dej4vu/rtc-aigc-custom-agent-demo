@@ -195,6 +195,7 @@ POST https://voice.cn-beijing.volces.com/api/v3/text-to-speech/{voice_id}/stream
   "text": "[happy] 你终于回来啦。[soft] 今天有没有偷偷想我？",
   "model_id": "doubao-seed-tts-3.0",
   "language_code": "zh",
+  "enable_subtitle": true,
   "output_format": { "format": "pcm", "sample_rate": 24000 },
   "voice_settings": {
     "speed": 0.96,
@@ -210,8 +211,35 @@ POST https://voice.cn-beijing.volces.com/api/v3/text-to-speech/{voice_id}/stream
 ```json
 {"event":"ready","session_id":"..."}
 {"event":"audio","audio":"<base64 PCM>"}
+{"event":"alignment","text":"你终于回来啦。","words":[{"word":"你","startTime":0,"endTime":0.165}]}
 {"event":"final","is_final":true,"reason":"TTS_STREAM_FINAL_REASON_CLOSED"}
 ```
+
+`alignment` 的字词时间戳相对当前 TTS 请求的音频起点。`TurnController`
+按每个已完成 TTS 请求的 PCM 字节数换算时长并累加，得到整轮回复的
+相对时间轴；随后发送 `subt` 自定义消息：
+
+```json
+{
+  "type": "subt",
+  "value": {
+    "data": [
+      {
+        "respId": 4,
+        "userId": "agent_xxx",
+        "text": "你终于来啦。",
+        "startTime": 0,
+        "endTime": 1.035,
+        "words": [{ "word": "你", "startTime": 0, "endTime": 0.165 }]
+      }
+    ]
+  }
+}
+```
+
+网页用 `respId` 把时间戳关联到对应字幕消息，展示句子级范围和
+可展开的词级时间戳。`subt` 与 `subv` 分离，不会重复创建字幕或改变
+原有增量字幕合并逻辑。
 
 同一 turn 的多句 TTS 使用相同 `session_id`，便于模型保持语气和情绪连续。
 `error` 事件会抛出包含 `code`、`message`、`request_id` 的错误，前端 Trace

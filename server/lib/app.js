@@ -55,16 +55,23 @@ function publicScene(sceneId, definition, config, bot) {
 async function serveStatic(ctx, config) {
   const relativePath = ctx.path.replace(/^\/rtc-demo\/?/, "") || "index.html";
   const safePath = path.posix.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+  const sendOptions = {
+    root: config.publicDir,
+    // Deployments replace index.html without cleaning old precompressed
+    // sidecars; never let a stale index.html.gz override the fresh entry.
+    gzip: false,
+    brotli: false,
+  };
   try {
     await KoaSend(ctx, safePath, {
-      root: config.publicDir,
+      ...sendOptions,
       index: "index.html",
       maxage: 1000 * 60 * 60 * 12,
       immutable: false,
     });
   } catch (error) {
     if (error.code === "ENOENT") {
-      await KoaSend(ctx, "index.html", { root: config.publicDir });
+      await KoaSend(ctx, "index.html", sendOptions);
       return;
     }
     throw error;

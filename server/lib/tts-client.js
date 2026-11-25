@@ -130,6 +130,7 @@ class TtsClient {
         text,
         model_id: this.config.tts.modelId || "doubao-seed-tts-3.0",
         language_code: this.config.tts.languageCode || "zh",
+        enable_subtitle: this.config.tts.enableSubtitle !== false,
         output_format: {
           format: this.config.tts.format,
           sample_rate: this.config.tts.sampleRate,
@@ -178,7 +179,23 @@ class TtsClient {
     return headers;
   }
 
-  async synthesize(text, { signal, onChunk = async () => {}, sessionId } = {}) {
+  audioDurationSec(bytes) {
+    const format = String(this.config.tts.format || "").toLowerCase();
+    if (format !== "pcm" || !bytes || !this.config.tts.sampleRate) {
+      return 0;
+    }
+    return bytes / (this.config.tts.sampleRate * 2);
+  }
+
+  async synthesize(
+    text,
+    {
+      signal,
+      onChunk = async () => {},
+      onAlignment = async () => {},
+      sessionId,
+    } = {}
+  ) {
     const requestId = uuidv4();
     const res = await this.fetchImpl(this.buildUrl(), {
       method: "POST",
@@ -210,6 +227,10 @@ class TtsClient {
         ended = true;
         break;
       }
+      if (parsed.type === "alignment") {
+        await onAlignment(parsed.raw);
+        continue;
+      }
       if (parsed.type !== "audio" || !parsed.buffer.length) {
         continue;
       }
@@ -217,7 +238,14 @@ class TtsClient {
       bytes += parsed.buffer.length;
       await onChunk(parsed.buffer);
     }
-    return { requestId, chunks, bytes, ended, apiVersion: this.apiVersion };
+    return {
+      requestId,
+      chunks,
+      bytes,
+      durationSec: this.audioDurationSec(bytes),
+      ended,
+      apiVersion: this.apiVersion,
+    };
   }
 }
 

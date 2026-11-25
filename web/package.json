@@ -18,7 +18,7 @@
   },
   "scripts": {
     "start": "cross-env REACT_APP_LOCAL=cn  craco start",
-    "build": "craco build",
+    "build": "cross-env REACT_APP_AIGC_PROXY_HOST=/rtc-demo craco build",
     "test": "craco test --watchAll=false",
     "eject": "react-scripts eject",
     "prettier": "prettier --write '**/*.{js,jsx,tsx,ts,less,md,json}'",

@@ -1,6 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const zlib = require("zlib");
 const { EventEmitter } = require("events");
 const { buildConfig } = require("../lib/config");
 const { createApp } = require("../lib/app");
@@ -42,10 +45,10 @@ class FakeMmpg extends EventEmitter {
   }
 }
 
-async function withServer(fn) {
+async function withServer(fn, appConfig = config) {
   const mmpgs = [];
   const app = createApp({
-    config,
+    config: appConfig,
     sceneDir: path.join(__dirname, "../scenes"),
     botResolver: {
       async resolve() {
@@ -89,6 +92,28 @@ async function withServer(fn) {
     await new Promise((resolve) => server.close(resolve));
   }
 }
+
+test("serves the fresh index instead of a stale gzip sidecar", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rtc-static-"));
+  const fresh = '<!doctype html><html><body><div id="fresh">NEW BUILD</div></body></html>';
+  const stale = '<!doctype html><html><body><div id="stale">OLD BUILD</div></body></html>';
+  fs.writeFileSync(path.join(dir, "index.html"), fresh);
+  fs.writeFileSync(path.join(dir, "index.html.gz"), zlib.gzipSync(stale));
+  const staticConfig = buildConfig({ ...config.env, PUBLIC_DIR: dir });
+  try {
+    await withServer(async ({ base }) => {
+      const res = await fetch(`${base}/rtc-demo/`, {
+        headers: { "Accept-Encoding": "gzip" },
+      });
+      const body = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(body, /NEW BUILD/);
+      assert.doesNotMatch(body, /OLD BUILD/);
+    }, staticConfig);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 async function post(base, pathname, body) {
   const res = await fetch(`${base}${pathname}`, {

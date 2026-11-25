@@ -157,6 +157,7 @@ Bot：情感陪伴-自有 agent (xbotrbBWpRQkA)
 | `TTS_LANGUAGE_CODE`                             | 否   | 3.0 默认 `zh`                                                                                |
 | `TTS_SPEAKER`                                   | 否   | 3.0 默认 `multi_female_sajiaoxuemei_v3_uranus_bigtts`（撒娇学妹 3.0）                        |
 | `TTS_SPEED` / `TTS_PITCH`                       | 否   | 3.0 语速/音高，默认 `0.96` / `1`                                                             |
+| `TTS_ENABLE_SUBTITLE`                           | 否   | 3.0 是否请求字词级字幕时间戳，默认 `1`                                                       |
 | `TTS_INSTRUCTIONS`                              | 否   | 3.0 表达风格指令，JSON 字符串数组                                                            |
 | `TTS_RESOURCE_ID`                               | 否   | 仅 `TTS_API_VERSION=2.0` 时使用，默认 `seed-tts-2.0`                                         |
 | `TTS_SAMPLE_RATE`                               | 否   | 默认 24000，必须与 MMPG 的 `pcm24` 匹配                                                      |
@@ -178,10 +179,22 @@ X-Api-Key: <TTS_API_KEY>
 Content-Type: application/json
 ```
 
-请求体包含 `text`、`model_id`、`language_code`、`output_format` 和
-`voice_settings`；响应逐行返回 `ready` / `audio` / `final` / `error` 事件。
+请求体包含 `text`、`model_id`、`language_code`、`output_format`、
+`voice_settings` 和 `enable_subtitle`；响应逐行返回
+`ready` / `audio` / `alignment` / `final` / `error` 事件。
 服务端按行解析，把 `audio` 的 Base64 PCM 通过
 `assistant.audio.delta` 回传 RTC。
+
+开启 `enable_subtitle` 后，SeedTTS 3.0 会额外返回字词级时间戳：
+
+```json
+{"event":"alignment","text":"你终于来啦。","words":[{"word":"你","startTime":0,"endTime":0.165,"confidence":0.88}]}
+```
+
+服务端把每个 TTS 请求的时间轴按前序音频时长累加，再通过 `subt`
+自定义消息下发；网页按 `respId` 关联到对应回复，在气泡内显示
+句子级时间范围和可展开的词级时间戳。当前时间戳用于展示与验收，
+尚未用于驱动字幕高亮或音频对齐。`TTS_ENABLE_SUBTITLE=0` 可关闭。
 
 默认人设「绯绯」使用撒娇学妹 3.0 作为底声，并通过
 `TTS_INSTRUCTIONS` 和[官方内联标签](https://docs.volcengine.com/docs/doubao-voice/audio-emotion-tag-inline-best-practices?lang=zh)
@@ -226,7 +239,7 @@ yarn preflight        # 配置、Bot、凭证预检
 yarn preflight -- --handshake
                       # 只验证 MMPG WebSocket 签名与握手
 yarn probe            # 真实创建一次 MMPG session，验证参数
-yarn --cwd web build  # 前端生产构建
+yarn --cwd web build  # 前端生产构建，API 走同源 /rtc-demo
 ```
 
 健康检查：

@@ -10,22 +10,78 @@ import { RootState } from '@/store';
 import Loading from '@/components/Loading/HorizonLoading';
 import { isMobile } from '@/utils/utils';
 import { useScene } from '@/lib/useCommon';
+import { SubtitleTiming } from '@/store/slices/room';
 import USER_AVATAR from '@/assets/img/userAvatar.png';
 import styles from './index.module.less';
 import AIAvatarReadying from '@/components/AIAvatarLoading';
 
 const lines: (string | React.ReactNode)[] = [];
 
+const formatSeconds = (value?: number, digits = 3) =>
+  Number.isFinite(value) ? `${Number(value).toFixed(digits)}s` : '—';
+
+const formatRange = (start?: number, end?: number, digits = 3) =>
+  `${formatSeconds(start, digits)} – ${formatSeconds(end, digits)}`;
+
+function SubtitleTimestamps({ timings }: { timings: SubtitleTiming[] }) {
+  const words = timings.flatMap((timing) => timing.words || []);
+  return (
+    <div className={styles.timingPanel}>
+      <div className={styles.timingHeader}>
+        <span className={styles.timingTitle}>字幕时间戳</span>
+        <span className={styles.timingTotal}>
+          {formatRange(timings[0]?.startTime, timings[timings.length - 1]?.endTime)}
+        </span>
+      </div>
+      <div className={styles.timingSegments}>
+        {timings.map((timing, index) => (
+          <div className={styles.timingRow} key={`${timing.startTime}-${index}`}>
+            <span className={styles.timingRange}>
+              {formatRange(timing.startTime, timing.endTime)}
+            </span>
+            <span className={styles.timingText}>{timing.text || '（无文本）'}</span>
+          </div>
+        ))}
+      </div>
+      {words.length ? (
+        <details className={styles.timingDetails}>
+          <summary>词级时间戳 · {words.length} 个</summary>
+          <div className={styles.timingWords}>
+            {words.map((word, index) => (
+              <span
+                className={styles.timingWord}
+                key={`${word.word}-${word.startTime}-${index}`}
+                title={
+                  Number.isFinite(word.confidence)
+                    ? `置信度 ${Number(word.confidence).toFixed(3)}`
+                    : undefined
+                }
+              >
+                <span>{word.word}</span>
+                <em>{formatRange(word.startTime, word.endTime)}</em>
+              </span>
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function Conversation(props: React.HTMLAttributes<HTMLDivElement> & { showSubtitle: boolean }) {
   const { className, showSubtitle, ...rest } = props;
   const room = useSelector((state: RootState) => state.room);
-  const { msgHistory, isFullScreen } = room;
+  const { msgHistory, isFullScreen, subtitleTimings } = room;
   const { userId } = useSelector((state: RootState) => state.room.localUser);
   const { isAIReady, isAITalking, isUserTalking, activeAgentUserId } = useSelector(
     (state: RootState) => state.room
   );
   const containerRef = useRef<HTMLDivElement>(null);
   const { botName, icon, name, isAvatarScene } = useScene();
+  const timingCount = Object.values(subtitleTimings).reduce(
+    (total, timings) => total + timings.length,
+    0
+  );
 
   const isUserTextLoading = (owner: string) => {
     return owner === userId && isUserTalking;
@@ -43,7 +99,7 @@ function Conversation(props: React.HTMLAttributes<HTMLDivElement> & { showSubtit
     if (container) {
       container.scrollTop = container.scrollHeight - container.clientHeight;
     }
-  }, [msgHistory.length]);
+  }, [msgHistory.length, timingCount]);
 
   return (
     <div
@@ -69,13 +125,14 @@ function Conversation(props: React.HTMLAttributes<HTMLDivElement> & { showSubtit
       ) : (
         ''
       )}
-      {(showSubtitle ? msgHistory : [])?.map(({ value, user, isInterrupted }, index) => {
+      {(showSubtitle ? msgHistory : [])?.map(({ value, user, isInterrupted, respId }, index) => {
         const isUserMsg = user === userId;
         const isRobotMsg =
           user === activeAgentUserId || user === botName || user.includes('voiceChat_');
         if (!isUserMsg && !isRobotMsg) {
           return '';
         }
+        const timings = !isUserMsg && respId ? subtitleTimings[String(respId)] : undefined;
         return (
           <div
             key={`msg-container-${index}`}
@@ -107,6 +164,7 @@ function Conversation(props: React.HTMLAttributes<HTMLDivElement> & { showSubtit
                 </div>
               </div>
               {!isUserMsg && isInterrupted ? <Tag className={styles.interruptTag}>已打断</Tag> : ''}
+              {timings?.length ? <SubtitleTimestamps timings={timings} /> : null}
             </div>
           </div>
         );

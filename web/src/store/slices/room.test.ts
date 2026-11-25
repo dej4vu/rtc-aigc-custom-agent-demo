@@ -1,6 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import reducer, {
   appendTrace,
+  appendSubtitleTiming,
   localLeaveRoom,
   setActiveAgent,
   updateAIGCState,
@@ -86,6 +87,7 @@ test('attributes subtitles to the server-issued agent user id', () => {
   expect(state.activeBotName).toBe('情感陪伴-自有 agent');
   expect(state.msgHistory).toHaveLength(1);
   expect(state.msgHistory[0].user).toBe('agent_call_1');
+  expect(state.msgHistory[0].definite).toBe(true);
 });
 
 test('keeps a bounded trace history and resets it on leave', () => {
@@ -100,4 +102,38 @@ test('keeps a bounded trace history and resets it on leave', () => {
 
   state = reducer(state, localLeaveRoom());
   expect(state.traceEntries).toEqual([]);
+});
+
+test('stores subtitle timings by respId and resets them on leave', () => {
+  let state = reducer(undefined, { type: 'room/init' });
+  const timing = {
+    respId: 7,
+    userId: 'agent-1',
+    text: '你回来啦。',
+    startTime: 0,
+    endTime: 0.955,
+    words: [
+      { word: '你', startTime: 0, endTime: 0.165, confidence: 0.88 },
+      { word: '回来啦。', startTime: 0.165, endTime: 0.955 },
+    ],
+  };
+  state = reducer(state, appendSubtitleTiming(timing));
+  state = reducer(state, appendSubtitleTiming(timing));
+  state = reducer(
+    state,
+    setHistoryMsg({
+      user: 'agent-1',
+      text: '你回来啦。',
+      respId: 7,
+      definite: true,
+      paragraph: true,
+    })
+  );
+
+  expect(state.msgHistory[0].respId).toBe(7);
+  expect(state.subtitleTimings['7']).toHaveLength(1);
+  expect(state.subtitleTimings['7'][0].words).toHaveLength(2);
+
+  state = reducer(state, localLeaveRoom());
+  expect(state.subtitleTimings).toEqual({});
 });

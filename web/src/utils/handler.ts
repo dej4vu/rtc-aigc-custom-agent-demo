@@ -7,6 +7,7 @@ import { useDispatch } from 'react-redux';
 import logger from './logger';
 import {
   appendTrace,
+  appendSubtitleTiming,
   setHistoryMsg,
   setInterruptMsg,
   TraceEntry,
@@ -23,6 +24,7 @@ export type AnyRecord = Record<string, any>;
 export enum MESSAGE_TYPE {
   BRIEF = 'conv',
   SUBTITLE = 'subv',
+  SUBTITLE_TIMING = 'subt',
   FUNCTION_CALL = 'tool',
   TRACE = 'trace',
 }
@@ -126,7 +128,7 @@ export const useMessageHandler = () => {
       const data = parsed.data?.[0] || {};
       /** debounce 记录用户输入文字 */
       if (data) {
-        const { text: msg, definite, userId: user, paragraph } = data;
+        const { text: msg, definite, userId: user, paragraph, respId } = data;
         const isAudioEnable = RtcClient.getAgentEnabled();
         logger.flow('SUBTITLE', '收到字幕片段', {
           user,
@@ -138,9 +140,22 @@ export const useMessageHandler = () => {
           logger.debug('handleRoomBinaryMessageReceived', data);
         }
         if (isAudioEnable) {
-          dispatch(setHistoryMsg({ text: msg, user, paragraph, definite }));
+          dispatch(setHistoryMsg({ text: msg, user, paragraph, definite, respId }));
         }
       }
+    },
+    [MESSAGE_TYPE.SUBTITLE_TIMING]: (parsed: AnyRecord) => {
+      const data = parsed.data?.[0];
+      if (!data) {
+        return;
+      }
+      logger.flow('SUBTITLE-TIMING', '收到字幕时间戳', {
+        respId: data.respId,
+        user: data.userId,
+        range: [data.startTime, data.endTime],
+        words: Array.isArray(data.words) ? data.words.length : 0,
+      });
+      dispatch(appendSubtitleTiming(data));
     },
     /**
      * @brief Function calling

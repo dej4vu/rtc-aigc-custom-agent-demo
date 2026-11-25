@@ -31,9 +31,26 @@ export interface Msg {
   value: string;
   time: string;
   user: string;
+  respId?: number;
   paragraph?: boolean;
   definite?: boolean;
   isInterrupted?: boolean;
+}
+
+export interface SubtitleWord {
+  word: string;
+  startTime: number;
+  endTime: number;
+  confidence?: number;
+}
+
+export interface SubtitleTiming {
+  respId: number;
+  userId: string;
+  text: string;
+  startTime: number;
+  endTime: number;
+  words: SubtitleWord[];
 }
 
 export interface SceneConfig {
@@ -137,6 +154,11 @@ export interface RoomState {
   traceEntries: TraceEntry[];
 
   /**
+   * @brief TTS 字词级字幕时间戳，按 respId 关联到对应回复
+   */
+  subtitleTimings: Record<string, SubtitleTiming[]>;
+
+  /**
    * @brief 当前的对话
    */
   currentConversation: {
@@ -194,6 +216,7 @@ const initialState: RoomState = {
 
   msgHistory: [],
   traceEntries: [],
+  subtitleTimings: {},
   currentConversation: {},
   isShowSubtitle: true,
   isFullScreen: false,
@@ -242,6 +265,7 @@ export const roomSlice = createSlice({
       state.isAITalking = false;
       state.isUserTalking = false;
       state.traceEntries = [];
+      state.subtitleTimings = {};
     },
     remoteUserJoin: (state, { payload }) => {
       const exists = state.remoteUsers.some((user) => user.userId === payload.userId);
@@ -367,9 +391,10 @@ export const roomSlice = createSlice({
     },
     clearHistoryMsg: (state) => {
       state.msgHistory = [];
+      state.subtitleTimings = {};
     },
     setHistoryMsg: (state, { payload }) => {
-      const { paragraph, definite } = payload;
+      const { paragraph, definite, respId } = payload;
       const lastMsg = state.msgHistory.at(-1)! || {};
       /** 是否需要再创建新句子 */
       const sceneConfig = state.sceneConfigMap[state.scene];
@@ -395,6 +420,7 @@ export const roomSlice = createSlice({
             value: payload.text,
             time: new Date().toString(),
             user: payload.user,
+            respId,
             definite,
             paragraph,
           });
@@ -409,6 +435,7 @@ export const roomSlice = createSlice({
           lastMsg.paragraph = paragraph;
           lastMsg.definite = definite;
           lastMsg.user = payload.user;
+          lastMsg.respId = respId ?? lastMsg.respId;
         }
       } else {
         /** 首句话首字不会被打断 */
@@ -416,9 +443,41 @@ export const roomSlice = createSlice({
           value: payload.text,
           time: new Date().toString(),
           user: payload.user,
+          respId,
+          definite,
           paragraph,
         });
       }
+    },
+    appendSubtitleTiming: (state, { payload }: { payload: SubtitleTiming }) => {
+      const respId = Number(payload?.respId);
+      if (
+        !Number.isFinite(respId) ||
+        !payload?.userId ||
+        !Array.isArray(payload.words) ||
+        !payload.words.length
+      ) {
+        return;
+      }
+      const key = String(respId);
+      const timings = state.subtitleTimings[key] || [];
+      const duplicate = timings.some(
+        (item) =>
+          item.text === payload.text &&
+          item.startTime === payload.startTime &&
+          item.endTime === payload.endTime
+      );
+      if (!duplicate) {
+        timings.push({
+          respId,
+          userId: payload.userId,
+          text: payload.text,
+          startTime: payload.startTime,
+          endTime: payload.endTime,
+          words: payload.words,
+        });
+      }
+      state.subtitleTimings[key] = timings.slice(-200);
     },
     setInterruptMsg: (state) => {
       state.isAITalking = false;
@@ -439,6 +498,7 @@ export const roomSlice = createSlice({
     clearCurrentMsg: (state) => {
       state.currentConversation = {};
       state.msgHistory = [];
+      state.subtitleTimings = {};
       state.isAITalking = false;
       state.isUserTalking = false;
     },
@@ -474,6 +534,7 @@ export const {
   appendTrace,
   clearTrace,
   setHistoryMsg,
+  appendSubtitleTiming,
   clearHistoryMsg,
   clearCurrentMsg,
   setInterruptMsg,

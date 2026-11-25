@@ -165,6 +165,7 @@ function buildConfig(env = process.env) {
       format: read(env, "TTS_FORMAT") || "pcm",
       speed: readNumber(env, "TTS_SPEED", 0.96),
       pitch: readNumber(env, "TTS_PITCH", 1),
+      enableSubtitle: readBoolean(env, "TTS_ENABLE_SUBTITLE", true),
       instructions: readJsonStringArray(env, "TTS_INSTRUCTIONS", [
         "甜软、亲密、轻声撒娇，表面温柔，藏着一点占有欲和危险感",
       ]),
@@ -266,6 +267,7 @@ function publicConfigStatus(config) {
       format: config.tts.format,
       speed: config.tts.speed,
       pitch: config.tts.pitch,
+      enableSubtitle: config.tts.enableSubtitle,
       instructionCount: config.tts.instructions.length,
     },
     logTranscripts: config.logTranscripts,

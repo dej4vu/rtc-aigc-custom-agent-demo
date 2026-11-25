@@ -40,6 +40,30 @@ describe('parseMmpgMessage', () => {
     });
   });
 
+  test('parses TTS subtitle timing envelopes', () => {
+    const parsed = parseMmpgMessage(
+      encode({
+        v: 1,
+        type: 'subt',
+        value: {
+          data: [
+            {
+              respId: 1,
+              userId: 'agent-1',
+              text: '你好',
+              startTime: 0,
+              endTime: 0.5,
+              words: [{ word: '你好', startTime: 0, endTime: 0.5 }],
+            },
+          ],
+        },
+      })
+    );
+
+    expect(parsed.type).toBe('subt');
+    expect(parsed.value.data[0].words[0].endTime).toBe(0.5);
+  });
+
   test('keeps compatibility with the legacy RTS TLV format', () => {
     const body = JSON.stringify({
       data: [{ text: '你好', userId: 'web-1', definite: true, paragraph: true }],

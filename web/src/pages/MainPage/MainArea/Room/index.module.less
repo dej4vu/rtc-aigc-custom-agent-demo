@@ -72,6 +72,98 @@
       margin-bottom: 12px;
     }
 
+    .timingPanel {
+      flex: 0 0 100%;
+      width: 100%;
+      max-width: 460px;
+      box-sizing: border-box;
+      margin-top: 10px;
+      padding-top: 9px;
+      border-top: 1px dashed rgba(115, 122, 135, 0.26);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.55;
+      color: #737a87;
+      text-align: left;
+
+      .timingHeader {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 4px;
+      }
+
+      .timingTitle {
+        font-weight: 600;
+        color: #4e5969;
+        letter-spacing: 0.02em;
+      }
+
+      .timingTotal {
+        color: #8a94a6;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .timingSegments {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .timingRow {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .timingRange {
+        flex: 0 0 auto;
+        color: #6c5ce7;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .timingText {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .timingDetails {
+        margin-top: 5px;
+
+        summary {
+          cursor: pointer;
+          color: #4e5969;
+          user-select: none;
+        }
+      }
+
+      .timingWords {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+        max-height: 132px;
+        overflow: auto;
+      }
+
+      .timingWord {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(108, 92, 231, 0.08);
+        white-space: nowrap;
+
+        em {
+          font-style: normal;
+          color: #8a94a6;
+          font-variant-numeric: tabular-nums;
+        }
+      }
+    }
+
     .loading-wrapper {
       width: max-content;
       display: inline-block;
@@ -143,6 +235,35 @@
     }
     .robot {
       background: rgba(0, 12, 71, 0.5);
+    }
+
+    .timingPanel {
+      color: rgba(255, 255, 255, 0.72);
+      border-top-color: rgba(255, 255, 255, 0.22);
+
+      .timingTitle {
+        color: #fff;
+      }
+
+      .timingTotal {
+        color: rgba(255, 255, 255, 0.58);
+      }
+
+      .timingRange {
+        color: #d8d2ff;
+      }
+
+      .timingDetails summary {
+        color: rgba(255, 255, 255, 0.82);
+      }
+
+      .timingWord {
+        background: rgba(255, 255, 255, 0.13);
+
+        em {
+          color: rgba(255, 255, 255, 0.58);
+        }
+      }
     }
   }
 
@@ -433,6 +554,11 @@
   .sentence {
     margin-left: 0 !important;
     max-width: 85% !important;
+  }
+
+  .timingPanel {
+    font-size: 10px;
+    max-width: 100%;
   }
 
   .mobileLine {

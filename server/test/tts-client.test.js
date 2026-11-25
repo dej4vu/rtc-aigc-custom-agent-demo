@@ -100,15 +100,25 @@ test("builds SeedTTS 3.0 URL, headers, body and streams audio", async () => {
           event: "audio",
           audio: Buffer.from([3, 4]).toString("base64"),
         }),
+        JSON.stringify({
+          event: "alignment",
+          text: "你回来啦。",
+          words: [
+            { word: "你", startTime: 0, endTime: 0.2, confidence: 0.9 },
+            { word: "回来啦。", startTime: 0.2, endTime: 0.8 },
+          ],
+        }),
         JSON.stringify({ event: "final", is_final: true }),
       ]),
     };
   };
   const client = new TtsClient(config, { fetchImpl });
   const chunks = [];
+  const alignments = [];
   const result = await client.synthesize("[happy] 你回来啦。", {
     sessionId: "turn-1",
     onChunk: async (chunk) => chunks.push(chunk),
+    onAlignment: async (alignment) => alignments.push(alignment),
   });
 
   assert.equal(
@@ -122,6 +132,7 @@ test("builds SeedTTS 3.0 URL, headers, body and streams audio", async () => {
   assert.equal(body.text, "[happy] 你回来啦。");
   assert.equal(body.model_id, "doubao-seed-tts-3.0");
   assert.equal(body.language_code, "zh");
+  assert.equal(body.enable_subtitle, true);
   assert.equal(body.session_id, "turn-1");
   assert.deepEqual(body.output_format, { format: "pcm", sample_rate: 24000 });
   assert.deepEqual(body.voice_settings.instructions, [
@@ -131,8 +142,12 @@ test("builds SeedTTS 3.0 URL, headers, body and streams audio", async () => {
   assert.equal(result.apiVersion, "3.0");
   assert.equal(result.chunks, 2);
   assert.equal(result.bytes, 4);
+  assert.equal(result.durationSec, 4 / 48000);
   assert.equal(result.ended, true);
   assert.deepEqual(Buffer.concat(chunks), Buffer.from([1, 2, 3, 4]));
+  assert.equal(alignments.length, 1);
+  assert.equal(alignments[0].text, "你回来啦。");
+  assert.equal(alignments[0].words[1].endTime, 0.8);
 });
 
 test("keeps the Doubao TTS 2.0 request shape behind the version switch", async () => {

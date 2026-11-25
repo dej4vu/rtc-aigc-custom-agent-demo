@@ -199,3 +199,51 @@ test("strips tags from the welcome subtitle but speaks the original text", async
   assert.equal(welcome.text, "你终于来啦。我还以为你不会找我了呢。");
   assert.ok(ttsRequests.some((text) => text.includes("[happy]")));
 });
+
+test("emits turn-relative subtitle timings from TTS alignment events", async () => {
+  const { controller, custom, donePromise } = makeController({
+    agent: {
+      async reply({ onDelta }) {
+        await onDelta("第一句。第二句。", { firstTokenLatencyMs: 5 });
+        return { text: "第一句。第二句。" };
+      },
+    },
+    tts: {
+      async synthesize(text, { onChunk, onAlignment }) {
+        await onChunk(Buffer.alloc(48000));
+        await onAlignment({
+          text,
+          words: [
+            { word: text.slice(0, 1), startTime: 0.1, endTime: 0.5 },
+          ],
+        });
+        return { chunks: 1, bytes: 48000, durationSec: 1 };
+      },
+    },
+  });
+
+  await controller.handleEvent({
+    type: "user.audio.transcription.done",
+    conv_id: "conv-1",
+    transcript: "你好",
+  });
+  await donePromise;
+
+  const timings = custom
+    .filter((item) => item.type === "subt")
+    .flatMap((item) => item.value.data);
+  assert.equal(timings.length, 2);
+  assert.equal(timings[0].respId, 1);
+  assert.equal(timings[0].text, "第一句。");
+  assert.equal(timings[0].startTime, 0.1);
+  assert.equal(timings[0].endTime, 0.5);
+  assert.equal(timings[1].text, "第二句。");
+  assert.equal(timings[1].startTime, 1.1);
+  assert.equal(timings[1].endTime, 1.5);
+
+  const assistantSubtitles = custom
+    .filter((item) => item.type === "subv")
+    .flatMap((item) => item.value.data)
+    .filter((item) => item.userId === "agent-1");
+  assert.ok(assistantSubtitles.every((item) => item.respId === 1));
+});

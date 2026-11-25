@@ -38,6 +38,42 @@ function sanitizeForSpeech(text) {
     .trim();
 }
 
+function normalizeAlignment(payload, offsetSec = 0) {
+  const words = Array.isArray(payload?.words) ? payload.words : [];
+  const normalized = words
+    .map((item) => {
+      const startTime = Number(item?.startTime) + offsetSec;
+      const endTime = Number(item?.endTime) + offsetSec;
+      if (
+        typeof item?.word !== "string" ||
+        !item.word ||
+        !Number.isFinite(startTime) ||
+        !Number.isFinite(endTime)
+      ) {
+        return null;
+      }
+      const word = {
+        word: item.word,
+        startTime,
+        endTime,
+      };
+      if (Number.isFinite(Number(item.confidence))) {
+        word.confidence = Number(item.confidence);
+      }
+      return word;
+    })
+    .filter(Boolean);
+  if (!normalized.length) {
+    return null;
+  }
+  return {
+    text: String(payload?.text || "").trim(),
+    startTime: normalized[0].startTime,
+    endTime: normalized[normalized.length - 1].endTime,
+    words: normalized,
+  };
+}
+
 function parsePayload(payload) {
   if (!payload) {
     return null;
@@ -324,6 +360,7 @@ class TurnController {
       userId: this.agentUserId,
       definite: true,
       paragraph: true,
+      respId: turn.respId,
     });
     this.enqueueTts(turn, this.welcomeMessage);
   }
@@ -358,6 +395,7 @@ class TurnController {
       startedAt: this.now(),
       firstAudioAt: 0,
       firstTokenAt: 0,
+      timingOffsetSec: 0,
       text: "",
       cancelled: false,
       finished: false,
@@ -394,6 +432,7 @@ class TurnController {
           userId: this.agentUserId,
           definite: false,
           paragraph: false,
+          respId: turn.respId,
         });
         for (const sentence of segmenter.push(delta)) {
           this.enqueueTts(turn, sentence);
@@ -431,6 +470,7 @@ class TurnController {
         userId: this.agentUserId,
         definite: true,
         paragraph: true,
+        respId: turn.respId,
       });
     } else {
       this.trace("llm.empty");
@@ -480,6 +520,7 @@ class TurnController {
   }
 
   async speakJob(turn, text) {
+    const offsetSec = turn.timingOffsetSec || 0;
     let pending = null;
     try {
       this.logger.info?.("[TEXT][TTS->TTS-REQUEST]", {
@@ -488,9 +529,20 @@ class TurnController {
         agent: this.agentUserId,
         text,
       });
-      await this.tts.synthesize(text, {
+      const result = await this.tts.synthesize(text, {
         signal: turn.abort.signal,
         sessionId: turn.id,
+        onAlignment: async (alignment) => {
+          if (turn.cancelled || turn.finished) {
+            return;
+          }
+          this.sendSubtitleTiming({
+            respId: turn.respId,
+            userId: this.agentUserId,
+            alignment,
+            offsetSec,
+          });
+        },
         onChunk: async (buffer) => {
           if (turn.cancelled || turn.finished || !buffer?.length) {
             return;
@@ -509,6 +561,11 @@ class TurnController {
           pending = buffer;
         },
       });
+      const durationSec =
+        Number(result?.durationSec) ||
+        this.tts.audioDurationSec?.(result?.bytes) ||
+        0;
+      turn.timingOffsetSec = offsetSec + durationSec;
     } catch (error) {
       if (turn.cancelled || error?.name === "AbortError") {
         return;
@@ -642,13 +699,31 @@ class TurnController {
     });
   }
 
-  sendSubtitle({ text, userId, definite, paragraph }) {
+  sendSubtitle({ text, userId, definite, paragraph, respId }) {
     const visibleText = stripInlineTags(text);
     if (!visibleText || !userId) {
       return;
     }
     this.sendCustom("subv", {
-      data: [{ text: visibleText, userId, definite, paragraph }],
+      data: [
+        {
+          text: visibleText,
+          userId,
+          definite,
+          paragraph,
+          ...(respId ? { respId } : {}),
+        },
+      ],
+    });
+  }
+
+  sendSubtitleTiming({ respId, userId, alignment, offsetSec }) {
+    const timing = normalizeAlignment(alignment, offsetSec);
+    if (!timing || !respId || !userId) {
+      return;
+    }
+    this.sendCustom("subt", {
+      data: [{ respId, userId, ...timing }],
     });
   }
 

@@ -15,10 +15,10 @@
 
 ```bash
 yarn --cwd server test
-# 35 passed
+# 37 passed
 
 CI=true yarn --cwd web test --runInBand
-# 4 suites, 14 passed
+# 4 suites, 16 passed
 
 yarn --cwd web build
 # Compiled successfully
@@ -43,6 +43,7 @@ yarn --cwd web build
 | LLM            | 流式返回，例如“我是你的绯绯呀，只属于你的女朋友哦。”                 |
 | TTS            | SeedTTS 3.0 `tts.first_chunk` 正常，请求保留 `[soft]` 等标签          |
 | 字幕           | 标签被清洗；页面不出现 `[happy]` / `[soft]`                          |
+| 字幕时间戳     | 机器人字幕气泡显示句子级时间范围，展开后显示词级时间戳                |
 | 下行播放       | `playback.started` / `playback.done` 正常                            |
 | 轮次结束       | 两轮均出现 `turn.finished`（`audio_done`）                           |
 | 打断           | `barge_in`，旧 `resp_id` 取消，新回复使用更高 `resp_id`              |
@@ -56,6 +57,42 @@ yarn --cwd web build
 - 同一 call 的 `client.ready` 仅 1 次
 - 页面字幕无 `[happy]` / `[soft]` 等内联标签
 - 显式挂断后测试环境 `activeCalls=0`
+
+字幕时间戳验收使用同一轮 Edge 158 两轮对话，结果：
+
+```json
+{
+  "welcome": true,
+  "turns": 2,
+  "asr": true,
+  "llm": true,
+  "tts": true,
+  "playbackStarted": true,
+  "playbackDone": true,
+  "turnFinished": true,
+  "assistantReplies": 2,
+  "subtitlesClean": true,
+  "subtitleTimestamps": 2,
+  "timingRanges": 6,
+  "wordTimings": 2,
+  "clientReadySent": 1,
+  "activeCallsAfterHangup": 0,
+  "errors": []
+}
+```
+
+页面展示示例：
+
+```text
+字幕时间戳                     0.000s – 3.835s
+0.000s – 1.055s  你终于来啦。
+1.645s – 2.655s  我还以为……
+2.735s – 3.835s  你今天不会找我了呢。
+▶ 词级时间戳 · 20 个
+```
+
+`alignment` 在音频流之后到达，因此当前只用于展示，不驱动字幕高亮；
+后续若做卡拉 OK 效果，需要先缓存首句音频或按时间戳调度高亮。
 
 一次成功链路的耗时示例：
 

@@ -104,6 +104,7 @@ test("defaults to SeedTTS 3.0 with the yandere companion voice", () => {
   assert.equal(config.tts.apiVersion, "3.0");
   assert.equal(config.tts.modelId, "doubao-seed-tts-3.0");
   assert.equal(config.tts.languageCode, "zh");
+  assert.equal(config.tts.enableSubtitle, true);
   assert.equal(
     config.tts.speaker,
     "multi_female_sajiaoxuemei_v3_uranus_bigtts"
