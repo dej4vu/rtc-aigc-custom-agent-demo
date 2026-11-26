@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 1 课：一次通话的完整生命周期</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Lesson 001</p>
+      <h1>一次通话从哪里开始，到哪里结束？</h1>
+      <p class="lede">先不要陷入代码细节。你只需要把「发起、进房、听、想、说、打断、退出」七个动作装进同一张地图。</p>
+    </header>
+    <section>
+      <h2>你将获得的一个小胜利</h2>
+      <p>读完本课，你应该能不看代码说出：用户说一句话后，系统为什么知道要调用 LLM，LLM 的文本为什么能变成 RTC 下行音频，以及打断时旧答案去哪了。</p>
+    </section>
+    <section>
+      <h2>全链路地图</h2>
+      <div class="flow">
+        <div class="flow-node"><strong>发起</strong><span>浏览器请求业务服务端，拿到 RTC Token。</span></div>
+        <div class="flow-node"><strong>进房</strong><span>RtcClient joinRoom，采集并发布麦克风。</span></div>
+        <div class="flow-node"><strong>建会话</strong><span>Node 服务签名连 MMPG，发 session.create。</span></div>
+        <div class="flow-node"><strong>听</strong><span>MMPG ASR 产 started / delta / done 事件。</span></div>
+        <div class="flow-node"><strong>想</strong><span>done 文本触发 Ark LLM 流式回复。</span></div>
+        <div class="flow-node"><strong>说</strong><span>分句调 SeedTTS，PCM 回传 RTC 播放。</span></div>
+        <div class="flow-node"><strong>打断/退出</strong><span>取消旧任务、递增 resp_id，或关闭会话。</span></div>
+      </div>
+      <p>这张图中的「听、想、说」才是业务开发的核心边界：RTC 负责可靠实时传输，MMPG/ASR 负责语音入口，你的 Agent 负责编排，LLM/TTS 是可替换的能力服务。</p>
+    </section>
+    <section>
+      <h2>一次用户提问的事件轨道</h2>
+      <div class="trace">
+        <div class="trace-row"><span class="trace-time">T+0</span><span class="trace-event">user.audio.transcription.started</span><span class="trace-note">用户开始说话；若有旧回复，先准备打断。</span></div>
+        <div class="trace-row"><span class="trace-time">T+1</span><span class="trace-event">user.audio.transcription.delta</span><span class="trace-note">增量识别文本，可用来观察状态。</span></div>
+        <div class="trace-row"><span class="trace-time">T+2</span><span class="trace-event">user.audio.transcription.done</span><span class="trace-note">最终文本确定；Agent 建一个新 turn。</span></div>
+        <div class="trace-row"><span class="trace-time">T+3</span><span class="trace-event">Ark chat.completions</span><span class="trace-note">把文本送入上下文，流式接收回复。</span></div>
+        <div class="trace-row"><span class="trace-time">T+4</span><span class="trace-event">SeedTTS streaming</span><span class="trace-note">按句合成 PCM，不等整段回复。</span></div>
+        <div class="trace-row"><span class="trace-time">T+5</span><span class="trace-event">assistant.audio.delta</span><span class="trace-note">Base64 PCM 回传；最后一包 done=true。</span></div>
+        <div class="trace-row"><span class="trace-time">T+6</span><span class="trace-event">assistant.message</span><span class="trace-note">发送纯文本字幕与 Trace。</span></div>
+      </div>
+      <p>关键延迟优化不是「让 LLM 更快说完」，而是让第一句尽快可播：LLM 一出现可结束的句子就交给 TTS，TTS 一出音频块就回传 RTC。</p>
+    </section>
+    <section>
+      <h2>为什么要用 Gateway，而不是浏览器直连模型？</h2>
+      <ul>
+        <li><strong>安全：</strong>AK/SK、ASR Key、Ark Key、TTS Key 都留在 Node 服务端。</li>
+        <li><strong>实时：</strong>麦克风音频经 RTC 上行，避免业务服务器自己接收高并发媒体流。</li>
+        <li><strong>可控：</strong>轮次、上下文、人设、取消和 Trace 都在你的自有 Agent。</li>
+        <li><strong>可替换：</strong>换 LLM 或 TTS 时，主要改 Agent 编排，不改浏览器通话壳。</li>
+      </ul>
+    </section>
+    <section class="exercise">
+      <h3>检索练习</h3>
+      <p>不看上文回答：哪一个 MMPG 事件应该触发新的 LLM turn？</p>
+      <div class="options">
+        <button type="button" data-answer="wrong">user.audio.transcription.started</button>
+        <button type="button" data-answer="right">user.audio.transcription.done</button>
+        <button type="button" data-answer="wrong">assistant.audio.started</button>
+      </div>
+      <p class="feedback" aria-live="polite"></p>
+    </section>
+    <div class="teacher-note">
+      <strong>给老师的问题：</strong>如果你已经知道 <code>done</code> 触发新 turn，那为什么 <code>started</code> 仍然不可缺少？想想打断和用户插入新问题时会发生什么。
+    </div>
+    <section class="source-box">
+      <h2>今天只读这一份主源</h2>
+      <p>优先阅读 <a href="https://docs.volcengine.com/docs/real-time-communication/quick-integrate-custom-agent-via-gateway?lang=zh" target="_blank" rel="noopener">火山引擎「快速接入：基于自有 Agent」</a>。你只需要找到 WebSocket、<code>session.create</code>、处理事件和回传音频这四部分，不必一次读完所有参数。</p>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="../reference/pipeline-cheatsheet.html">打开速查表</a> · <a href="../docs/architecture.md">本仓库架构文档</a> · <a href="../README.md#快速开始">README 快速开始</a></p>
+    </footer>
+    <aside class="ask">
+      <p>有任何一步不清楚，直接回到 Codex 问我。我会根据你的追问拆开 <code>server/lib/app.js</code>、<code>turn-controller.js</code> 或前端 RTC 代码继续讲。</p>
+    </aside>
+  </main>
+  <script src="../assets/lesson-quiz.js"></script>
+</body>
+</html>

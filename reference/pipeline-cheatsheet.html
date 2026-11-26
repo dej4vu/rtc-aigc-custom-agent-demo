@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RTC → ASR → LLM → TTS 速查表</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Reference</p>
+      <h1>全流程速查表</h1>
+      <p class="lede">按一次真实通话的记忆顺序整理：先定位层，再看事件，最后看数据格式。</p>
+    </header>
+    <section>
+      <h2>七层链路</h2>
+      <ol>
+        <li><strong>Browser</strong>：进房、采集麦克风、发布上行、订阅并播放下行。</li>
+        <li><strong>RTC</strong>：传输实时音频与二进制消息，屏蔽端侧网络细节。</li>
+        <li><strong>MMPG Gateway</strong>：接入自有 Agent，转发音频/事件，也承载 ASR 编排。</li>
+        <li><strong>ASR</strong>：把用户音频流识别成 started / delta / done 文本事件。</li>
+        <li><strong>Node Agent</strong>：接收 done 文本，维护轮次、上下文、取消和 Trace。</li>
+        <li><strong>LLM</strong>：Ark Chat Completions 流式产出文本 delta。</li>
+        <li><strong>TTS</strong>：按句合成 PCM，再经 Gateway 变成 <code>assistant.audio.delta</code>。</li>
+      </ol>
+    </section>
+    <section>
+      <h2>关键事件</h2>
+      <table>
+        <tr><th>方向</th><th>事件 / 接口</th><th>用途</th></tr>
+        <tr><td>Agent → MMPG</td><td><code>session.create</code></td><td>创建会话并声明 ASR、音频格式。</td></tr>
+        <tr><td>MMPG → Agent</td><td><code>user.audio.transcription.done</code></td><td>触发一次新回复。</td></tr>
+        <tr><td>Agent → LLM</td><td>Ark <code>chat.completions</code></td><td>流式生成文本。</td></tr>
+        <tr><td>Agent → TTS</td><td>SeedTTS JSONL streaming</td><td>按句合成 Base64 PCM。</td></tr>
+        <tr><td>Agent → MMPG</td><td><code>assistant.audio.delta</code></td><td>回传音频块；最后一块 <code>done=true</code>。</td></tr>
+        <tr><td>Agent → MMPG</td><td><code>assistant.audio.cancel</code></td><td>打断后取消旧音频。</td></tr>
+        <tr><td>Agent → Browser</td><td><code>assistant.message</code></td><td>Trace 和自定义字幕。</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>本项目硬约定</h2>
+      <ul>
+        <li>TTS 输出是 24 kHz PCM，对应 MMPG <code>pcm24</code>。</li>
+        <li>每句可独立合成，降低首包延迟；多句共用同一 TTS turn 上下文。</li>
+        <li>用户再次说话时取消旧 LLM/TTS，清空队列，递增 <code>resp_id</code>。</li>
+        <li>情感标签送给 TTS；字幕和历史消息先清洗标签。</li>
+        <li>密钥只在服务端；浏览器只拿一次性 RTC Token。</li>
+      </ul>
+    </section>
+    <section>
+      <h2>排障顺序</h2>
+      <ol>
+        <li>服务健康：<code>GET /health</code>。</li>
+        <li>凭证与 Bot：<code>yarn preflight</code>。</li>
+        <li>MMPG 参数：<code>yarn probe</code>。</li>
+        <li>浏览器麦克风与 RTC 发布。</li>
+        <li>按 Trace 检查 <code>client.ready</code> → ASR → LLM → TTS → playback。</li>
+      </ol>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="../lessons/0001-first-call-lifecycle.html">返回第 1 课</a> · <a href="../README.md">项目 README</a></p>
+    </footer>
+  </main>
+</body>
+</html>

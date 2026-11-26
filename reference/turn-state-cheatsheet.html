@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>轮次状态机速查表</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Reference</p>
+      <h1>Turn 状态机速查表</h1>
+      <p class="lede">一条规则：<code>resp_id</code> 是音频所有权；<code>AbortController</code> 是任务所有权；TTS 队列是待播资产。</p>
+    </header>
+    <section>
+      <h2>状态转移</h2>
+      <table>
+        <tr><th>输入事件</th><th>条件</th><th>结果</th></tr>
+        <tr><td><code>user.conversation.created</code></td><td>无 active turn 且不是 SPEAKING</td><td><code>LISTENING</code></td></tr>
+        <tr><td><code>user.audio.transcription.started</code></td><td>有未完成 turn</td><td>取消旧 turn，进入 INTERRUPTED，递增 respId</td></tr>
+        <tr><td><code>user.audio.transcription.done</code></td><td>文本非空</td><td>push user message；创建 turn，进入 THINKING</td></tr>
+        <tr><td>LLM delta</td><td>turn 未取消</td><td>累积文本、推送部分字幕、segmenter.push</td></tr>
+        <tr><td>第一个 TTS PCM</td><td>turn 未取消</td><td>进入 SPEAKING；发送 assistant.audio.delta</td></tr>
+        <tr><td><code>assistant.audio.done</code></td><td>resp_id 匹配</td><td>清 activeTurn，进入 FINISHED</td></tr>
+        <tr><td>LLM / TTS 错误</td><td>未被打断</td><td>trace error；FINISHED stage；IDLE 状态</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>打断必须做的五件事</h2>
+      <ol>
+        <li>置 <code>turn.cancelled = true</code>，让迟到回调丢弃。</li>
+        <li>调用 <code>turn.abort.abort()</code>，取消 Ark fetch 和 TTS fetch。</li>
+        <li>清空 <code>ttsQueue</code>，防止旧句子继续合成。</li>
+        <li>把 <code>respId</code> 提升到旧值 + 1，旧音频事件全部失效。</li>
+        <li>发送 <code>assistant.audio.cancel</code>，让 Gateway 停止下行播放。</li>
+      </ol>
+    </section>
+    <section>
+      <h2>流式边界</h2>
+      <ul>
+        <li><strong>ArkAgent</strong>：SSE 每行解析 <code>data:</code>，遇到 <code>[DONE]</code> 结束，delta 通过 <code>onDelta()</code> 回调。</li>
+        <li><strong>SentenceSegmenter</strong>：硬断句符包括 <code>。！？；…\n</code>；闭合引号跟随前句；超过 80 字从软断句符附近截断。</li>
+        <li><strong>TtsClient</strong>：3.0 走音色 streaming JSONL；<code>ready</code>/<code>audio</code>/<code>final</code>/<code>error</code>；Base64 PCM 解码后回调。</li>
+        <li><strong>TurnController</strong>：TTS 任务串行 drain；最后一个 pending chunk 才发 <code>done=true</code>。</li>
+      </ul>
+    </section>
+    <section>
+      <h2>测试即规格</h2>
+      <pre><code>yarn --cwd server test turn-controller
+yarn --cwd server test sentence-segmenter</code></pre>
+      <ul>
+        <li>断言同一次回复所有 <code>assistant.audio.delta</code> 共用 <code>resp_id=1</code>。</li>
+        <li>断言最后一包 <code>done=true</code> 后，<code>assistant.audio.done</code> 才能进入 <code>FINISHED</code>。</li>
+        <li>断言打断出现 <code>assistant.audio.cancel</code>、<code>INTERRUPTED</code>，新回复使用更高 <code>resp_id</code>。</li>
+        <li>断言 <code>[happy]</code> 保留给 TTS，但字幕和历史消息被清洗。</li>
+      </ul>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="../lessons/0003-turn-state-machine.html">第 3 课</a> · <a href="pipeline-cheatsheet.html">全流程速查表</a></p>
+    </footer>
+  </main>
+</body>
+</html>

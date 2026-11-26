@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 4 课：前端 RTC 与自定义消息</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <style>
+    .codec-lab {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+    }
+    .codec-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .codec-actions button {
+      padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--paper); font: inherit; font-size: 0.85rem; cursor: pointer;
+    }
+    .codec-actions button:hover { border-color: var(--accent); }
+    .codec-output { min-height: 104px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Lesson 004</p>
+      <h1>浏览器只做两件事：传音频，收发消息</h1>
+      <p class="lede">服务端协议已经打通。这一课把前端收窄成两条通路：麦克风和 AI 音频走 RTC 发布订阅；client.ready、字幕、状态和 Trace 走 RTC 二进制自定义消息。</p>
+    </header>
+    <section>
+      <h2>你将获得的小胜利</h2>
+      <p>你能解释为什么 <code>client.ready</code> 必须等双 ready，能读出 <code>cmsg</code> TLV 的 8 字节结构，也能判断无字幕、无欢迎语该查前端还是查服务端。</p>
+    </section>
+    <section>
+      <h2>点击通话后的真实顺序</h2>
+      <ol>
+        <li><strong>RTC 能力检查</strong>：<code>VERTC.isSupported()</code>。</li>
+        <li><strong>启动云端会话</strong>：前端 POST <code>/session/start</code>；服务端确认 MMPG 后返回 <code>callId</code>、<code>agentUserId</code>、RTC 配置和 Token。</li>
+        <li><strong>创建 engine</strong>：用 AppId 创建引擎，注册 AI 降噪扩展；失败时降级继续。</li>
+        <li><strong>绑定事件</strong>：特别是远端加入、远端发布音频、二进制消息和自动播放失败。</li>
+        <li><strong>进房</strong>：<code>isAutoPublish:true</code>、<code>isAutoSubscribeAudio:true</code>、chat 房间模式。</li>
+        <li><strong>枚举设备并启动麦克风</strong>：完成后调用 <code>markMicReady()</code>；即使失败也会兜底置位，保证会话能继续。</li>
+        <li><strong>等待 Agent ready</strong>：远端 Agent 加入或发布音频时调用 <code>markAgentReady()</code>。</li>
+        <li><strong>发送一次 client.ready</strong>：双 ready 满足后发送；3 秒定时器是防卡死的强制兜底。</li>
+      </ol>
+      <p>源码：<code>web/src/lib/useCommon.ts:205</code>、<code>web/src/lib/RtcClient.ts:255</code>、<code>web/src/lib/listenerHooks.ts:61</code>。</p>
+    </section>
+    <section>
+      <h2>为什么 3 秒强制 ready 不是侥幸？</h2>
+      <p>正常路径要求 Mic ready 和 Agent ready。但真实网络里，Agent 加入事件可能迟于麦克风准备完成，浏览器权限弹窗也可能阻塞用户操作。Demo 的选择是：正常事件优先，3 秒后允许 force ready。这样欢迎语最多晚一点，不会因为单个事件丢失而永久无声。</p>
+      <p>注意边界：force ready 只解决“事件迟到”，不解决“麦克风权限被永久拒绝”。后者要在设备权限和 RTC 错误日志里排障。</p>
+    </section>
+    <section>
+      <h2>自定义消息不是普通 WebSocket</h2>
+      <p>浏览器没有直连 MMPG。控制消息挂在 RTC 二进制消息通道上：</p>
+      <ul>
+        <li><strong>出站：</strong>浏览器调用 <code>sendUserBinaryMessage(agentUserId, bytes)</code>。</li>
+        <li><strong>包装：</strong><code>encodeMmpgMessage()</code> 使用 <code>cmsg</code> TLV 包装一层普通 JSON。</li>
+        <li><strong>入站：</strong>MMPG 的自定义消息经 <code>assistant.message</code> 进入 RTC，触发 <code>onRoomBinaryMessageReceived</code>。</li>
+        <li><strong>解析：</strong><code>parseMmpgMessage()</code> 兼容 UTF-8 JSON、Base64 JSON、<code>cmsg</code> TLV 和旧版 <code>subv</code> / <code>conv</code> / <code>tool</code> / <code>func</code> / <code>ctrl</code> TLV。</li>
+      </ul>
+      <p>TLV 结构只有 8 字节头：</p>
+      <pre><code>0-3  magic：cmsg、subv、conv...
+4-7  value 长度，big-endian uint32
+8-N  UTF-8 JSON</code></pre>
+      <p>关键陷阱：出站只包一层。测试 <code>web/src/utils/mmpg.test.ts:96</code> 明确要求 magic 是 <code>cmsg</code>、长度等于剩余字节、内层 JSON 没有二次字符串化。</p>
+    </section>
+    <section class="codec-lab">
+      <h2>消息编解码实验台</h2>
+      <p class="codec-output">点击一个样例，查看 TLV 的 8 字节头和内层 JSON。</p>
+      <div class="codec-actions">
+        <button type="button" data-sample="client">client.ready</button>
+        <button type="button" data-sample="trace">trace</button>
+        <button type="button" data-sample="subtitle">subv</button>
+      </div>
+    </section>
+    <section>
+      <h2>入站消息如何变成 UI</h2>
+      <table>
+        <tr><th>类型</th><th>作用</th><th>前端处理</th></tr>
+        <tr><td><code>conv</code></td><td>LISTENING / THINKING / SPEAKING / INTERRUPTED / FINISHED</td><td>更新 AI 状态；收到任何有效 Stage 也会标记 AI ready。</td></tr>
+        <tr><td><code>subv</code></td><td>用户与 Agent 字幕</td><td>按 userId、definite、paragraph 合并历史。</td></tr>
+        <tr><td><code>trace</code></td><td>服务端链路事件</td><td>进入 Trace 面板，显示延迟和 respId。</td></tr>
+        <tr><td><code>client.interrupt</code></td><td>手动打断</td><td>出站；服务端调用 cancelCurrent。</td></tr>
+      </table>
+      <p>源码：<code>web/src/utils/handler.ts:86</code>、<code>web/src/lib/listenerHooks.ts:275</code>。</p>
+    </section>
+    <section>
+      <h2>退出不是 leaveRoom 一行</h2>
+      <p>正常挂断先停采集，再请求 <code>/session/stop</code>，最后 <code>leaveRoom()</code> 并销毁 engine。顺序很重要：先停采集可减少上行噪声；服务端 stop 会关 TurnController 和 MMPG；销毁 engine 是浏览器最后清理。页面卸载无法保证 fetch，所以用 <code>navigator.sendBeacon()</code> 兜底。</p>
+    </section>
+    <section class="exercise">
+      <h3>检索练习</h3>
+      <p>前端发送自定义消息时，内层 JSON 应该怎么处理？</p>
+      <div class="options">
+        <button type="button" data-answer="right">包一层 cmsg，内层保持普通 JSON</button>
+        <button type="button" data-answer="wrong">包两层 cmsg，防止网关丢字段</button>
+        <button type="button" data-answer="wrong">内层先 JSON.stringify 再放进 cmsg</button>
+      </div>
+      <p class="feedback" aria-live="polite"></p>
+    </section>
+    <section class="exercise">
+      <h3>微任务：补一条诊断决策树</h3>
+      <p>打开 <code>web/src/lib/RtcClient.test.ts:47</code> 和 <code>web/src/utils/mmpg.test.ts:13</code>，然后回答：</p>
+      <ol>
+        <li>Trace 中没有 <code>client.ready</code>，你应该按哪四个字段依次检查？</li>
+        <li>RTC 收到二进制但 Trace 面板无变化，下一步查哪个函数的返回值？</li>
+      </ol>
+      <p>再运行：</p>
+      <pre><code>CI=true yarn --cwd web test --runInBand</code></pre>
+      <p>把两个答案和测试结果发我；答对后进入 TTS 3.0 情感标签协议课。</p>
+    </section>
+    <div class="teacher-note">
+      <strong>开发方式迁移：</strong>不要把业务状态散落在 RTC 回调里。RTC 回调只负责“收到原始消息/设备事件”，解析器负责归一化，Redux handler 负责状态更新，RtcClient 只负责发送和生命周期。
+    </div>
+    <section class="source-box">
+      <h2>今天只读这一份主源</h2>
+      <p>读本仓库 <code>web/src/utils/mmpg.test.ts:1</code>。它比 README 更精确：列出平台消息的真实形态、双层引号兼容和出站单层包装约定。读完再看 <code>handler.ts</code>，你会知道每个 UI 状态来自哪类消息。</p>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="0003-turn-state-machine.html">第 3 课</a> · <a href="../reference/frontend-rtc-cheatsheet.html">前端速查表</a> · <a href="../web/src/utils/mmpg.test.ts">消息测试</a></p>
+    </footer>
+    <aside class="ask">
+      <p>完成后把答案发我。下一课进入 SeedTTS 3.0：JSONL 事件、24 kHz PCM、语音风格、情感标签和“TTS 可读、字幕可看”的双通道文本处理。</p>
+    </aside>
+  </main>
+  <script src="../assets/lesson-quiz.js"></script>
+  <script src="../assets/message-codec.js"></script>
+</body>
+</html>

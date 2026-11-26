@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>服务端启动协议速查表</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Reference</p>
+      <h1>启动协议速查表</h1>
+      <p class="lede">开发或排障时按「HTTP → 身份 → WebSocket → Session → Ready → Cleanup」检查。</p>
+    </header>
+    <section>
+      <h2>对象边界</h2>
+      <table>
+        <tr><th>对象</th><th>创建点</th><th>生命周期</th><th>关键字段</th></tr>
+        <tr><td>Page Session</td><td><code>POST /getScenes</code></td><td>页面短暂上下文</td><td><code>SessionID</code>、scenes</td></tr>
+        <tr><td>Call</td><td><code>POST /session/start</code></td><td>一次真实通话</td><td>roomId、userId、agentUserId、mmpg、controller</td></tr>
+        <tr><td>Turn</td><td>ASR done 或欢迎语</td><td>一次回复</td><td>respId、history、TTS queue、cancelled</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>启动顺序</h2>
+      <ol>
+        <li><code>/getScenes</code> 创建页面 Session。</li>
+        <li><code>/session/start</code> 校验配置并停掉旧 call。</li>
+        <li>生成 RoomId、UserId、AgentUserId 和 RTC Token。</li>
+        <li>实例化 TurnController，注入 Ark、TTS、MMPG 发送器。</li>
+        <li>绑定 event / gatewayError / gatewayClose。</li>
+        <li><code>MmpgClient.connect()</code> 使用 AK/SK 签名握手。</li>
+        <li><code>createSession()</code> 先挂 <code>session.created</code> waiter，再发 <code>session.create</code>。</li>
+        <li>成功后 <code>store.setActiveCall()</code>、<code>controller.start()</code>。</li>
+        <li>前端 Mic + Agent 双 ready 后发送一次 <code>client.ready</code>。</li>
+        <li>停止时先关 controller，再发 <code>session.close</code> 并关闭 WebSocket。</li>
+      </ol>
+    </section>
+    <section>
+      <h2>session.create 关键块</h2>
+      <pre><code>AgentConfig.TransmitConfig:
+  Type: rtc
+  AppId, RoomId, UserId(agent), TargetUserId([browser])
+
+AudioConfig.AudioFormat:
+  UserAudioFormat: pcm16
+  AssistantAudioFormat: pcm24
+
+AudioConfig.VADConfig:
+  SilenceTime: 600
+  EnablePrefetch: true
+  AIVAD: true
+
+ASRConfig.ProviderParams:
+  Mode: bigmodel
+  ApiKey
+  ApiResourceId
+  StreamMode: 0</code></pre>
+    </section>
+    <section>
+      <h2>失败边界</h2>
+      <ul>
+        <li>握手失败：查 AK/SK、URL、时间和网络。</li>
+        <li>创建失败：catch 后 <code>mmpg.close()</code>，不要激活 call。</li>
+        <li>网关关闭：controller 收到 error 后 stopCall。</li>
+        <li>重复启动：用 <code>startPromise</code> 与旧 call 替换逻辑避免竞态。</li>
+        <li>残留会话：看 <code>/health</code> 的 activeCalls。</li>
+      </ul>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="../lessons/0002-server-session-bootstrap.html">第 2 课</a> · <a href="pipeline-cheatsheet.html">全流程速查表</a></p>
+    </footer>
+  </main>
+</body>
+</html>

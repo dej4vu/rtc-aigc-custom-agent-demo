@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SeedTTS 3.0 协议速查表</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Reference</p>
+      <h1>SeedTTS 3.0 协议速查表</h1>
+      <p class="lede">请求是一条句子的合成契约；响应是一行行 JSONL 事件；标签只进 TTS，不进眼睛。</p>
+    </header>
+    <section>
+      <h2>请求契约</h2>
+      <table>
+        <tr><th>项</th><th>值 / 规则</th></tr>
+        <tr><td>Endpoint</td><td><code>POST /api/v3/text-to-speech/{voice_id}/streaming</code></td></tr>
+        <tr><td>认证头</td><td><code>X-Api-Key</code>；3.0 另有 <code>X-Request-Id</code>，不使用 <code>X-Api-Resource-Id</code>。</td></tr>
+        <tr><td><code>text</code></td><td>保留官方内联标签的语音文本。</td></tr>
+        <tr><td><code>model_id</code></td><td>默认 <code>doubao-seed-tts-3.0</code>。</td></tr>
+        <tr><td><code>enable_subtitle</code></td><td>默认 true，请求字词级 <code>alignment</code>。</td></tr>
+        <tr><td><code>output_format</code></td><td><code>pcm / 24000</code>，必须匹配 MMPG <code>pcm24</code>。</td></tr>
+        <tr><td><code>voice_settings</code></td><td>speed、pitch、instructions。</td></tr>
+        <tr><td><code>session_id</code></td><td>同一 turn 的多句共用，稳定语气。</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>JSONL 事件</h2>
+      <table>
+        <tr><th>event</th><th>含义</th><th>Agent 处理</th></tr>
+        <tr><td><code>ready</code></td><td>流已建立。</td><td>等待音频。</td></tr>
+        <tr><td><code>audio</code></td><td>Base64 PCM。</td><td>解码后按序回传 <code>assistant.audio.delta</code>。</td></tr>
+        <tr><td><code>alignment</code></td><td>字词时间戳。</td><td>交给 <code>subt</code> 自定义消息，供前端字幕联动。</td></tr>
+        <tr><td><code>final</code></td><td>本句合成完成。</td><td>标记本句 ended。</td></tr>
+        <tr><td><code>error</code></td><td>错误 + request_id。</td><td>终止本句，Trace 显示 tts_error。</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>双通道文本</h2>
+      <ul>
+        <li><strong>TTS / 请求日志：</strong>保留 <code>[happy]</code> 等白名单标签。</li>
+        <li><strong>字幕 / LLM 历史：</strong>调用 <code>stripInlineTags()</code> 清洗标签。</li>
+        <li><strong>白名单：</strong>54 个情绪/语气标签 + 28 个副语言标签，共 82 个。</li>
+        <li><strong>非白名单：</strong><code>[备注]</code>、<code>[Note]</code> 保留，不误删业务方括号。</li>
+        <li><strong>流式部分标签：</strong>句尾出现 <code>[so</code>、<code>[</code> 时先隐藏，等 delta 补齐。</li>
+      </ul>
+    </section>
+    <section>
+      <h2>提示词规则</h2>
+      <ul>
+        <li>只使用官方英文标签；不翻译、不自造、不用中文方括号。</li>
+        <li>一次回复通常 1-2 个，最多 3 个。</li>
+        <li>同一位置一个标签；禁止 <code>[happy][soft]</code> 连排。</li>
+        <li>副语言标签插入后不再写重复拟声词。</li>
+        <li>没有合适标签时宁可不加。</li>
+      </ul>
+    </section>
+    <section>
+      <h2>排障</h2>
+      <ul>
+        <li>HTTP 403：音色未授权；更换已开通 speaker。</li>
+        <li>无声音：检查 speaker、JSONL error、24 kHz、最后包 <code>done=true</code>。</li>
+        <li>标签出现在字幕：检查是否漏调用 <code>stripInlineTags()</code>。</li>
+        <li>标签被朗读：确认标签在白名单且只控制 TTS，不要作为正文返回。</li>
+        <li>时间戳缺失：检查 <code>TTS_ENABLE_SUBTITLE</code> 和 <code>alignment</code> 分发。</li>
+      </ul>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="../lessons/0005-seedtts-emotion-protocol.html">第 5 课</a> · <a href="pipeline-cheatsheet.html">全流程速查表</a></p>
+    </footer>
+  </main>
+</body>
+</html>

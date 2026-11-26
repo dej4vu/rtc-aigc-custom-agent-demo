@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 5 课：SeedTTS 3.0 与情感标签</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <style>
+    .tts-lab { padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); }
+    .tts-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .tts-actions button {
+      padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--paper); font: inherit; font-size: 0.85rem; cursor: pointer;
+    }
+    .tts-actions button:hover { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Lesson 005</p>
+      <h1>一段文本，两条命运</h1>
+      <p class="lede">第 4 课解决了浏览器消息。这一课回答最后一块能力协议：LLM 文本如何同时变成可听的 PCM 和可看的字幕，情感标签又为什么不能进入眼睛。</p>
+    </header>
+    <section>
+      <h2>你将获得的小胜利</h2>
+      <p>你能画出 SeedTTS 3.0 的请求契约、JSONL 事件流和文本双通道规则；也能判断无声音、有字无音、标签泄漏分别查哪一层。</p>
+    </section>
+    <section>
+      <h2>一条语音句子的完整契约</h2>
+      <p>LLM delta 经 <code>SentenceSegmenter</code> 成句后，<code>TtsClient.synthesize()</code> 发出 3.0 音色级流式请求：</p>
+      <pre><code>POST https://voice.cn-beijing.volces.com/api/v3/text-to-speech/{voice_id}/streaming
+X-Api-Key: &lt;TTS_API_KEY&gt;
+X-Request-Id: &lt;uuid&gt;
+Content-Type: application/json</code></pre>
+      <pre><code>{
+  "text": "[happy] 你终于来啦。",
+  "model_id": "doubao-seed-tts-3.0",
+  "language_code": "zh",
+  "enable_subtitle": true,
+  "output_format": { "format": "pcm", "sample_rate": 24000 },
+  "voice_settings": {
+    "speed": 0.96,
+    "pitch": 1,
+    "instructions": ["甜软、亲密，轻声撒娇"]
+  },
+  "session_id": "同一 turn 的 UUID"
+}</code></pre>
+      <p>三个硬约束：<code>pcm/24000</code> 必须对应 MMPG <code>pcm24</code>；3.0 请求头不用 <code>X-Api-Resource-Id</code>；同一 turn 的多句共用 <code>session_id</code> 以稳定语气。</p>
+    </section>
+    <section>
+      <h2>JSONL 事件流</h2>
+      <table>
+        <tr><th>event</th><th>含义</th><th>TtsClient / TurnController</th></tr>
+        <tr><td><code>ready</code></td><td>流建立</td><td>等待音频。</td></tr>
+        <tr><td><code>audio</code></td><td>Base64 PCM</td><td>解码为 Buffer；第一个 chunk 触发 <code>tts.first_chunk</code> 和 <code>SPEAKING</code>。</td></tr>
+        <tr><td><code>alignment</code></td><td>字词时间戳</td><td>经自定义消息分发，供字幕联动。</td></tr>
+        <tr><td><code>final</code></td><td>本句完成</td><td>本句 <code>ended=true</code>；是否发全局 <code>done=true</code> 仍由 turn 决定。</td></tr>
+        <tr><td><code>error</code></td><td>错误与 request_id</td><td>抛出错误；TurnController trace <code>tts_error</code>。</td></tr>
+      </table>
+      <p><code>final</code> 只表示一句 TTS 结束。只有 LLM 完成、TTS 队列为空、pending chunk 发出后，才向 MMPG 发送空 payload 的 <code>assistant.audio.delta(done=true)</code>。这是第 3 课 <code>resp_id</code> 所有权在 TTS 层的延续。</p>
+    </section>
+    <section class="tts-lab">
+      <h2>协议实验台</h2>
+      <div class="tts-actions">
+        <button type="button" data-sample="welcome">合法欢迎语</button>
+        <button type="button" data-sample="badAdjacent">连排标签</button>
+        <button type="button" data-sample="custom">普通方括号</button>
+      </div>
+      <h3>TTS 请求</h3>
+      <pre class="request-output">选择一个输入样例。</pre>
+      <h3>文本通道</h3>
+      <div class="tokens-output"></div>
+      <h3>JSONL 响应示例</h3>
+      <div class="protocol-output"></div>
+    </section>
+    <section>
+      <h2>情感标签是调色板，不是台词</h2>
+      <p>服务端把官方 82 个标签完整注入系统提示词：54 个情绪/语气控制标签，28 个副语言拟声标签。规则刻意克制：</p>
+      <ul>
+        <li>一次回复通常 1-2 个，最多 3 个。</li>
+        <li>标签写在句首或情绪转折处；同一位置只能一个。</li>
+        <li>禁止 <code>[happy][soft]</code> 连排；标签之间必须有正文。</li>
+        <li>只允许官方英文拼写，不自造、不翻译、不用中文方括号。</li>
+        <li>没有合适标签时宁可不加。</li>
+      </ul>
+      <p>源码：<code>server/lib/inline-tags.js:102</code>。</p>
+    </section>
+    <section>
+      <h2>双通道清洗规则</h2>
+      <p>同一份 LLM 文本有两种用途：</p>
+      <ol>
+        <li><strong>语音通道：</strong>句子进入 <code>enqueueTts()</code> 前，用 <code>sanitizeForSpeech()</code> 删除 Markdown；官方标签保留，SeedTTS 自己消费。</li>
+        <li><strong>可见通道：</strong>字幕、欢迎语展示和 LLM history 调用 <code>stripInlineTags()</code>；白名单标签删除，普通方括号文本保留。</li>
+      </ol>
+      <p><code>stripInlineTags()</code> 有一个重要流式细节：句尾出现 <code>[so</code> 或 <code>[</code> 时，若它能匹配任何白名单标签前缀，就先隐藏，等下一个 delta 补齐后再判断。这防止用户短暂看到半个 <code>[soft]</code>。</p>
+      <p>源码：<code>server/lib/inline-tags.js:140</code>；测试：<code>server/test/inline-tags.test.js:13</code>。</p>
+    </section>
+    <section>
+      <h2>字幕时间戳是第三条通道</h2>
+      <p>请求默认 <code>enable_subtitle:true</code>，TTS 会返回 <code>alignment</code>。它不是主字幕本身，而是字词级时间元数据。前端通过 <code>subt</code> 自定义消息接收，并按 <code>respId</code> 与 Agent 字幕关联。当前实现已收集和展示这些时间戳，但还没有用它驱动逐字高亮；这是你改造语音 UI 的天然练习点。</p>
+      <p>源码：<code>server/lib/tts-client.js:190</code>、<code>web/src/utils/handler.ts:147</code>、<code>web/src/pages/MainPage/MainArea/Room/Conversation.tsx:128</code>。</p>
+    </section>
+    <section class="exercise">
+      <h3>检索练习</h3>
+      <p>SeedTTS 3.0 的 <code>final</code> 事件和 MMPG 的 <code>done=true</code> 是什么关系？</p>
+      <div class="options">
+        <button type="button" data-answer="wrong">final 就是 done，两者同帧发送</button>
+        <button type="button" data-answer="right">final 结束一句 TTS；done 要等整个 turn 音频结束</button>
+        <button type="button" data-answer="wrong">done 结束一句；final 结束整个 turn</button>
+      </div>
+      <p class="feedback" aria-live="polite"></p>
+    </section>
+    <section class="exercise">
+      <h3>微任务：读契约，改样例</h3>
+      <ol>
+        <li>打开 <code>server/test/tts-client.test.js:84</code>，列出测试断言的 URL、三个请求头、两个输出格式字段。</li>
+        <li>打开 <code>server/test/inline-tags.test.js:26</code>，解释为什么 <code>[so</code> 会被隐藏。</li>
+        <li>运行：<code>yarn --cwd server test tts-client</code> 和 <code>yarn --cwd server test inline-tags</code>。</li>
+      </ol>
+      <p>然后把实验台里的合法欢迎语改成：一个情绪标签 + 一句正文 + 一个副语言标签。注意不能连排，也不能在副语言标签后重复拟声词。把新文本发我。</p>
+    </section>
+    <div class="teacher-note">
+      <strong>开发方式迁移：</strong>模型能力不要散落拼字符串。把“官方标签清单、提示词约束、可见文本清洗”放在一个模块；把“URL、headers、请求体、JSONL 解码”放在客户端；把“是否完成播放”留给 TurnController。三层职责分开后，换音色、换 TTS 版本都不会污染轮次状态。
+    </div>
+    <section class="source-box">
+      <h2>今天只读这一份主源</h2>
+      <p>读 <a href="https://docs.volcengine.com/docs/doubao-voice/audio-emotion-tag-inline-best-practices?lang=zh" target="_blank" rel="noopener">官方内联情感标签最佳实践</a>，对照本仓库 <code>server/lib/inline-tags.js:6</code>。确认两件事：官方标签分类是否仍是 54 + 28；官方推荐的位置、频次和连排限制是否与提示词一致。</p>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="0004-frontend-rtc-custom-messages.html">第 4 课</a> · <a href="../reference/tts-protocol-cheatsheet.html">TTS 速查表</a> · <a href="../README.md#tts-30-与情感音色">README TTS</a></p>
+    </footer>
+    <aside class="ask">
+      <p>完成后发我测试结果和你的新标签文本。下一课做端到端验收与排障：用 <code>/health</code>、<code>preflight</code>、<code>probe</code>、Trace 和测试构造一个可交付的开发流程。</p>
+    </aside>
+  </main>
+  <script src="../assets/lesson-quiz.js"></script>
+  <script src="../assets/tts-protocol.js"></script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 3 课：轮次状态机与打断</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <style>
+    .turn-machine {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+    }
+    .machine-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .machine-actions button {
+      padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--paper); font: inherit; font-size: 0.85rem; cursor: pointer;
+    }
+    .machine-actions button:hover { border-color: var(--accent); }
+    .machine-status { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; }
+    .machine-resp { min-height: 48px; color: var(--muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Lesson 003</p>
+      <h1>ASR done 之后，谁拥有这次回复？</h1>
+      <p class="lede">第 2 课解决了“会话启动”。这一课回答实时 Agent 最难的问题：LLM 和 TTS 都在流式运行时，如何表示一次回复，又如何安全放弃它。</p>
+    </header>
+    <section>
+      <h2>你将获得的小胜利</h2>
+      <p>你能用三个所有权模型解释打断：<code>resp_id</code> 决定哪路音频还能被网关接受，<code>AbortController</code> 决定哪些网络请求停止，<code>ttsQueue</code> 决定哪些待合成文本丢弃。</p>
+    </section>
+    <section>
+      <h2>一次回复的生命周期</h2>
+      <ol>
+        <li><strong>ASR done</strong>：最终文本非空。控制器把用户文本压入历史，修剪上下文，创建新 turn。</li>
+        <li><strong>创建 turn</strong>：<code>respId += 1</code>；生成 <code>AbortController</code>；状态进入 <code>THINKING</code>。</li>
+        <li><strong>LLM delta</strong>：累积全文，推送未定字幕；文本同时进入 <code>SentenceSegmenter</code>。</li>
+        <li><strong>句子成熟</strong>：硬断句或超过 80 字触发切分；可读文本清洗 Markdown 后进入 TTS 队列。</li>
+        <li><strong>TTS chunk</strong>：第一个 Base64 PCM 解码成功后进入 <code>SPEAKING</code>，并通过 <code>assistant.audio.delta</code> 携带当前 <code>resp_id</code> 下行。</li>
+        <li><strong>最后一包</strong>：只有当 LLM 已完成且 TTS 队列为空，才发送空 payload、<code>done=true</code>。</li>
+        <li><strong>播放完成</strong>：网关回 <code>assistant.audio.done</code> 且 <code>resp_id</code> 匹配，turn 进入 <code>FINISHED</code>。</li>
+      </ol>
+      <p>源码：<code>server/lib/turn-controller.js:331</code> 到 <code>server/lib/turn-controller.js:601</code>。</p>
+    </section>
+    <section>
+      <h2>为什么必须串行 drain TTS？</h2>
+      <p><code>drainTtsQueue()</code> 用一个 <code>ttsDraining</code> 标志保证同一时刻只有一个 <code>speakJob()</code> 在消费队列。这不是为了性能保守，而是为了保序：</p>
+      <ul>
+        <li>句子 1 的 PCM 必须先于句子 2 到达网关。</li>
+        <li>只有所有旧句发送完、LLM 完成、队列为空，才能判定下一包是 <code>done=true</code>。</li>
+        <li>打断时清空队列即可让旧回复停止；正在进行的 fetch 由 AbortController 取消。</li>
+      </ul>
+    </section>
+    <section class="turn-machine">
+      <h2>交互模拟器</h2>
+      <p>按真实顺序点击，观察状态和 <code>resp_id</code>。试两条路径：正常回复；说话中途打断。</p>
+      <p class="machine-status">IDLE</p>
+      <p class="machine-resp">点击一个事件开始。</p>
+      <div class="machine-actions">
+        <button type="button" data-action="asr-started">user started</button>
+        <button type="button" data-action="asr-done">asr done</button>
+        <button type="button" data-action="llm-delta">llm delta</button>
+        <button type="button" data-action="tts-chunk">tts chunk</button>
+        <button type="button" data-action="playback-done">playback done</button>
+      </div>
+    </section>
+    <section>
+      <h2>打断的原子边界</h2>
+      <p>用户再次说话时，<code>user.audio.transcription.started</code> 不是简单改状态。它触发五件事：</p>
+      <pre><code>turn.cancelled = true;
+turn.abort.abort();
+ttsQueue.length = 0;
+respId = oldRespId + 1;
+await sendMmpgEvent("assistant.audio.cancel");</code></pre>
+      <p>源码：<code>server/lib/turn-controller.js:603</code>。这里没有数据库事务，但五个动作共同形成逻辑原子性：迟到的 LLM 回调用 <code>cancelled</code> 丢弃，网络请求用 signal 停止，旧音频用递增 <code>resp_id</code> 失效，网关播放用 cancel 命令停止。</p>
+    </section>
+    <section class="exercise">
+      <h3>检索练习</h3>
+      <p>不看上文回答：收到第一个非空 TTS PCM chunk 后，状态机应进入哪个状态？</p>
+      <div class="options">
+        <button type="button" data-answer="wrong">THINKING</button>
+        <button type="button" data-answer="right">SPEAKING</button>
+        <button type="button" data-answer="wrong">FINISHED</button>
+      </div>
+      <p class="feedback" aria-live="polite"></p>
+    </section>
+    <section class="exercise">
+      <h3>微任务：把测试当规格读</h3>
+      <p>打开 <code>server/test/turn-controller.test.js:50</code>，回答：</p>
+      <ol>
+        <li>测试为什么把两次 LLM delta 合成两个 TTS job，却断言所有音频共用 <code>resp_id=1</code>？</li>
+        <li><code>assistant.audio.done</code> 为什么要带 <code>resp_id=1</code> 才能把状态改成 <code>FINISHED</code>？</li>
+      </ol>
+      <p>再运行：</p>
+      <pre><code>yarn --cwd server test turn-controller</code></pre>
+      <p>如果测试失败，先不要改实现；把失败信息发我，我们一起判断是理解错了边界还是代码真的有回归。</p>
+    </section>
+    <div class="teacher-note">
+      <strong>开发方式迁移：</strong>修改这类系统前先问三个问题：谁拥有这次回复？谁负责取消？哪个事件代表真正完成？不要把取消逻辑分散到 LLM、TTS 和 UI 中；它们都应服从 TurnController 的 turn 所有权。
+    </div>
+    <section class="source-box">
+      <h2>今天只读这一份主源</h2>
+      <p>优先阅读本仓库测试 <code>server/test/turn-controller.test.js:1</code>。它是最高价值的主源：把抽象状态机变成四条可执行行为规格。官方协议文档解释网关接口，这份测试解释你的 Agent 如何安全使用它。</p>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="0002-server-session-bootstrap.html">第 2 课</a> · <a href="../reference/turn-state-cheatsheet.html">状态机速查表</a> · <a href="../server/test/turn-controller.test.js">TurnController 测试</a></p>
+    </footer>
+    <aside class="ask">
+      <p>完成微任务后告诉我。下一课有两种走法：前端 RTC 接入与自定义消息编解码，或者 TTS 情感标签与 3.0 JSONL 协议。你可以根据目标选择。</p>
+    </aside>
+  </main>
+  <script src="../assets/lesson-quiz.js"></script>
+  <script src="../assets/turn-machine.js"></script>
+</body>
+</html>

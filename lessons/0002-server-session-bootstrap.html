@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 2 课：服务端会话启动协议</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Lesson 002</p>
+      <h1>把“一次通话”变成服务端对象</h1>
+      <p class="lede">第 1 课给你地图。这一课进入真实开发入口：页面会话、call、RTC Token、MMPG WebSocket 和 <code>session.create</code> 是如何接起来的。</p>
+    </header>
+    <section>
+      <h2>你将获得的小胜利</h2>
+      <p>你能指出浏览器点击“通话”后服务端必须完成哪六件事，也能说出为什么页面 Session 和 call 必须分开设计。</p>
+    </section>
+    <section>
+      <h2>两类会话，不要混淆</h2>
+      <div class="compare">
+        <article>
+          <h3>Page Session</h3>
+          <p>由 <code>POST /getScenes</code> 创建，代表一个浏览器页面的短暂上下文。前端拿到 <code>SessionID</code> 和场景列表。</p>
+          <p><strong>作用：</strong>避免把场景配置和状态放进浏览器；后续 <code>/session/start</code> 需要它。</p>
+        </article>
+        <article>
+          <h3>Call</h3>
+          <p>由 <code>POST /session/start</code> 创建，代表一次真实通话。服务端生成 <code>roomId</code>、<code>userId</code>、<code>agentUserId</code>、RTC Token、MMPG 连接和 TurnController。</p>
+          <p><strong>作用：</strong>隔离房间身份、音频链路、轮次状态和清理逻辑。</p>
+        </article>
+      </div>
+    </section>
+    <section>
+      <h2>服务端启动调用链</h2>
+      <div class="steps">
+        <article>
+          <h3>1. 校验请求</h3>
+          <p>读取 <code>SessionID</code> 和 <code>SceneID</code>，确认页面 Session、场景和必要配置都存在。若启动 Promise 已存在，拒绝重复启动。</p>
+          <p><code>server/lib/app.js:301</code></p>
+        </article>
+        <article>
+          <h3>2. 替换旧 call</h3>
+          <p>同一页面再次启动时先停掉旧 call，关闭旧 TurnController 和旧 MMPG。</p>
+          <p><code>server/lib/app.js:325</code></p>
+        </article>
+        <article>
+          <h3>3. 创建身份</h3>
+          <p>每次通话生成独立 <code>demo_room</code>、<code>web_user</code>、<code>agent_user</code>，再为浏览器用户签发一小时 RTC Token。</p>
+          <p><code>server/lib/app.js:329</code></p>
+        </article>
+        <article>
+          <h3>4. 组装自有 Agent</h3>
+          <p>把系统提示词、欢迎语、ArkAgent、TtsClient、MMPG 发送函数和自定义消息函数注入 TurnController。</p>
+          <p><code>server/lib/app.js:360</code></p>
+        </article>
+        <article>
+          <h3>5. 绑定网关事件</h3>
+          <p>MMPG 的普通事件进入 TurnController；网关错误转成 <code>error</code> 事件；网关关闭触发 call 清理。</p>
+          <p><code>server/lib/app.js:387</code></p>
+        </article>
+        <article>
+          <h3>6. 握手与建会话</h3>
+          <p>先 AK/SK 签名建立 WebSocket，再发送 <code>session.create</code>；只有收到 <code>session.created</code> 才把 call 标记为 active。</p>
+          <p><code>server/lib/mmpg-client.js:181</code></p>
+        </article>
+      </div>
+    </section>
+    <section>
+      <h2><code>session.create</code> 声明了什么</h2>
+      <p><code>buildMmpgSession()</code> 是协议参数的集中地。它把 Bot 控制台默认值和环境变量合成一份网关配置：</p>
+      <ul>
+        <li><strong>AgentConfig.TransmitConfig</strong>：使用 RTC 传输，并绑定 AppId、RoomId、Agent UserId 和目标用户。</li>
+        <li><strong>AudioConfig.AudioFormat</strong>：用户音频默认 <code>pcm16</code>，助手音频默认 <code>pcm24</code>。</li>
+        <li><strong>AudioConfig.VADConfig</strong>：600ms 静音判停、预取和 AI VAD。</li>
+        <li><strong>ASRConfig</strong>：Provider 是 <code>volcano</code>；当前网关使用 <code>Mode / ApiKey / ApiResourceId / StreamMode</code>，不包 Credential。</li>
+        <li><strong>SubtitleConfig</strong>：关闭平台 RTS 字幕，字幕由你的 Agent 通过 <code>assistant.message</code> 自定义下发。</li>
+      </ul>
+      <pre><code>AgentConfig.TransmitConfig = {
+  Type: "rtc",
+  AppId, RoomId, UserId,
+  UserId: agentUserId,
+  TargetUserId: [userId]
+};
+
+AudioConfig.AudioFormat = {
+  UserAudioFormat: "pcm16",
+  AssistantAudioFormat: "pcm24"
+};
+
+ASRConfig.ProviderParams = {
+  Mode: "bigmodel",
+  ApiKey,
+  ApiResourceId,
+  StreamMode: 0
+};</code></pre>
+      <p>代码源： <a href="https://docs.volcengine.com/docs/real-time-communication/quick-integrate-custom-agent-via-gateway?lang=zh" target="_blank" rel="noopener">官方自有 Agent 接入文档</a>。</p>
+    </section>
+    <section>
+      <h2>前端必须等两个 ready</h2>
+      <p>浏览器收到启动结果后，先保存 RTC 配置和 <code>agentUserId</code>，再进房。它不会立刻上报就绪，而是等：</p>
+      <ol>
+        <li><strong>麦克风 ready</strong>：本地采集和发布准备完成。</li>
+        <li><strong>Agent ready</strong>：收到目标 Agent 的远端音频/用户进入事件。</li>
+      </ol>
+      <p>两者都满足后，前端用 <code>cmsg</code> TLV 发送一次 <code>client.ready</code>。服务端把它转为欢迎语触发条件。这个设计防止欢迎语在浏览器还不能播放时就被消费。</p>
+      <p>代码源：<code>web/src/lib/RtcClient.ts:148</code>、<code>web/src/lib/RtcClient.ts:509</code></p>
+    </section>
+    <section>
+      <h2>排查地图</h2>
+      <table>
+        <tr><th>现象</th><th>优先检查</th></tr>
+        <tr><td>401 / 握手失败</td><td><code>AK/SK</code>、MMPG URL、系统时间、签名服务。</td></tr>
+        <tr><td><code>session.create</code> 校验失败</td><td>ASR <code>ApiKey</code>、<code>ApiResourceId</code>、RTC AppId/RoomId/UserId。</td></tr>
+        <tr><td>进房但无欢迎语</td><td>Trace 是否出现一次 <code>client.ready</code>；Mic 与 Agent 是否双 ready。</td></tr>
+        <tr><td>页面关闭仍占用</td><td><code>/session/stop</code>、MMPG <code>gatewayClose</code>、<code>activeCalls</code>。</td></tr>
+      </table>
+    </section>
+    <section class="exercise">
+      <h3>开发检索练习</h3>
+      <p>按真实执行顺序排列三件事，先点击“启动顺序”按钮作答：</p>
+      <div class="options">
+        <button type="button" data-reveal="reveal">启动顺序</button>
+        <button type="button" data-answer="right">签名连 MMPG → 发送 session.create → 等待 session.created</button>
+        <button type="button" data-answer="wrong">发送 session.create → 签名连 MMPG → 等待 session.created</button>
+        <button type="button" data-answer="wrong">等待 session.created → 签名连 MMPG → 发送 session.create</button>
+      </div>
+      <p class="feedback" aria-live="polite"></p>
+    </section>
+    <section class="exercise">
+      <h3>微任务：读代码找边界</h3>
+      <p>打开 <code>server/lib/app.js:301</code> 和 <code>server/lib/mmpg-client.js:154</code>，用一句话回答：</p>
+      <ol>
+        <li>如果 WebSocket 握手成功但 <code>session.created</code> 超时，哪个函数会清理 MMPG？</li>
+        <li>为什么服务端不能在 <code>session.created</code> 前调用 <code>store.setActiveCall()</code>？</li>
+      </ol>
+      <p>把答案发给我，我会检查后带你进入第 3 课的轮次状态机。</p>
+    </section>
+    <div class="teacher-note">
+      <strong>记住开发方式：</strong>先确定业务边界（页面 / call / turn），再把协议对象组装出来，最后把异步事件交给状态机。不要让路由层直接处理 ASR、LLM、TTS。</div>
+    <section class="source-box">
+      <h2>主源阅读任务</h2>
+      <p>读 <a href="https://docs.volcengine.com/docs/real-time-communication/quick-integrate-custom-agent-via-gateway?lang=zh" target="_blank" rel="noopener">快速接入：基于自有 Agent</a> 的「建立 WebSocket」和「创建并初始化会话」。记录三件事：签名方式、<code>session.create</code> 的必填块、成功确认事件名。</p>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="0001-first-call-lifecycle.html">第 1 课</a> · <a href="../reference/pipeline-cheatsheet.html">速查表</a> · <a href="../reference/server-bootstrap-cheatsheet.html">启动协议速查表</a> · <a href="../docs/architecture.md">架构文档</a></p>
+    </footer>
+    <aside class="ask">
+      <p>看不懂任何一行就问我。下一课我们将进入 <code>TurnController</code>：done 事件如何变成 LLM、分句、TTS 队列、播放完成和打断。</p>
+    </aside>
+  </main>
+  <script src="../assets/lesson-quiz.js"></script>
+</body>
+</html>

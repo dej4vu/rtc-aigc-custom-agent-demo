@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>端到端交付速查表</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Reference</p>
+      <h1>端到端交付速查表</h1>
+      <p class="lede">先静态，后外部；先自动化，后真实浏览器；先功能，后清理。</p>
+    </header>
+    <section>
+      <h2>验收漏斗</h2>
+      <ol>
+        <li><strong>静态健康：</strong><code>curl -s http://127.0.0.1:3101/health</code>；期待 <code>ok=true</code>、<code>issues=[]</code>。</li>
+        <li><strong>凭证与 Bot：</strong><code>yarn preflight</code>；必要时 <code>yarn preflight -- --handshake</code>。</li>
+        <li><strong>网关参数：</strong><code>yarn probe</code>；真实创建一次 <code>session.create</code>。</li>
+        <li><strong>行为基准：</strong><code>yarn test</code>；当前通过基线是服务端 37 + 前端 16。</li>
+        <li><strong>生产构建：</strong><code>yarn --cwd web build</code>。</li>
+        <li><strong>真实链路：</strong><code>yarn dev</code>，浏览器允许麦克风，完成欢迎语和两轮对话。</li>
+        <li><strong>清理：</strong>显式挂断后 <code>activeCalls=0</code>。</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Trace 最低通过集</h2>
+      <table>
+        <tr><th>链路段</th><th>必须出现</th><th>失败含义</th></tr>
+        <tr><td>会话</td><td><code>mmpg.session.created</code></td><td>启动协议或参数失败。</td></tr>
+        <tr><td>客户端</td><td><code>client.ready</code> 恰好 1 次</td><td>双 ready、TLV 或 UserId 失败。</td></tr>
+        <tr><td>ASR</td><td><code>asr.started</code> → <code>asr.done</code></td><td>麦克风、发布、ASR 凭证或音频上行失败。</td></tr>
+        <tr><td>LLM</td><td><code>llm.first_token</code> → <code>llm.done</code></td><td>Ark Key、模型、网络或提示词处理失败。</td></tr>
+        <tr><td>TTS</td><td><code>tts.first_chunk</code></td><td>TTS Key、音色、JSONL、PCM 格式失败。</td></tr>
+        <tr><td>播放</td><td><code>playback.started</code> → <code>playback.done</code></td><td>MMPG 下行或浏览器自动播放失败。</td></tr>
+        <tr><td>完成</td><td><code>turn.finished</code></td><td>resp_id、done 包或播放确认失败。</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>分层排障</h2>
+      <dl>
+        <dt>连不上 3101</dt><dd>服务未启动、HOST/PORT、CORS、前端 proxy host。</dd>
+        <dt>preflight 失败</dt><dd>AK/SK、RTCFullAccess、账号、BOT_ID。</dd>
+        <dt>probe 失败</dt><dd>ASR ApiKey / ApiResourceId / StreamMode；不要包 Credential。</dd>
+        <dt>进房无字幕</dt><dd>麦克风权限、发布、client.ready、ASR 事件。</dd>
+        <dt>有字无声</dt><dd>TTS 403、speaker、pcm24、最后包 done、自动播放。</dd>
+        <dt>无法打断</dt><dd>asr.started、barge_in、client.interrupt、音频静音。</dd>
+        <dt>activeCalls 残留</dt><dd>/session/stop、gatewayClose、beforeunload sendBeacon。</dd>
+      </dl>
+    </section>
+    <section>
+      <h2>安全交付底线</h2>
+      <ul>
+        <li>密钥只进服务端环境；前端只拿一次性 RTC Token。</li>
+        <li><code>/health</code> 只返回配置存在性和活动会话数，不返回值。</li>
+        <li>日志默认不记完整转写；开启 <code>LOG_TRANSCRIPTS</code> 前先评估隐私。</li>
+        <li>生产限制 CORS origin，不要依赖本地 localhost 放行。</li>
+      </ul>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="../lessons/0006-end-to-end-delivery.html">第 6 课</a> · <a href="pipeline-cheatsheet.html">全流程</a> · <a href="turn-state-cheatsheet.html">状态机</a></p>
+    </footer>
+  </main>
+</body>
+</html>

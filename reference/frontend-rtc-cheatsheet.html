@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>前端 RTC 与消息速查表</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Reference</p>
+      <h1>前端 RTC 与消息速查表</h1>
+      <p class="lede">音频走 RTC 的发布订阅；控制、字幕和 Trace 走 RTC 二进制自定义消息。</p>
+    </header>
+    <section>
+      <h2>启动与就绪</h2>
+      <table>
+        <tr><th>步骤</th><th>代码</th><th>目的</th></tr>
+        <tr><td><code>/getScenes</code></td><td>页面初始化</td><td>创建 Page Session，取场景。</td></tr>
+        <tr><td><code>/session/start</code></td><td><code>RtcClient.startAgent()</code></td><td>拿 callId、agentUserId、RTC 配置和 Token。</td></tr>
+        <tr><td>创建引擎</td><td><code>createEngine()</code></td><td>初始化 RTC 和 AI 降噪扩展。</td></tr>
+        <tr><td>绑定监听</td><td><code>addEventListeners()</code></td><td>接收入房、发布和二进制消息。</td></tr>
+        <tr><td>进房</td><td><code>joinRoom()</code></td><td><code>isAutoPublish:true</code>；自动订阅音频。</td></tr>
+        <tr><td>麦克风 ready</td><td><code>markMicReady()</code></td><td>采集/发布完成后置位；失败仍兜底置位。</td></tr>
+        <tr><td>Agent ready</td><td><code>markAgentReady()</code></td><td>远端 Agent 加入或发布音频且 UserId 匹配。</td></tr>
+        <tr><td>client.ready</td><td><code>maybeSendClientReady()</code></td><td>双 ready 后只发一次；3 秒后强制兜底。</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>自定义消息方向</h2>
+      <table>
+        <tr><th>方向</th><th>格式</th><th>处理</th></tr>
+        <tr><td>浏览器 → 服务端</td><td><code>cmsg</code> TLV + 普通 JSON</td><td>Gateway 转为 <code>user.message</code>。</td></tr>
+        <tr><td>服务端 → 浏览器</td><td>MMPG <code>assistant.message.payload</code>，常表现为 UTF-8 JSON 或 <code>cmsg</code> TLV</td><td>RTC <code>onRoomBinaryMessageReceived</code> 接收。</td></tr>
+        <tr><td>状态</td><td><code>conv</code> + Stage Code</td><td>更新听/想/说/打断/结束。</td></tr>
+        <tr><td>字幕</td><td><code>subv</code> + data[0]</td><td>渲染用户和 Agent 文本。</td></tr>
+        <tr><td>Trace</td><td><code>trace</code> + stage</td><td>进入全链路 Trace 面板。</td></tr>
+        <tr><td>手动打断</td><td><code>cmsg</code> + <code>client.interrupt</code></td><td>服务端调用 cancelCurrent。</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>TLV 帧</h2>
+      <pre><code>0-3   magic，例如 cmsg / subv
+4-7   value 长度，big-endian uint32
+8-N   UTF-8 value</code></pre>
+      <p>出站只包一层 <code>cmsg</code>；不要对内层 JSON 再 <code>JSON.stringify</code>，否则服务端会看到带引号的字符串。</p>
+    </section>
+    <section>
+      <h2>清理顺序</h2>
+      <ol>
+        <li>停止音频、视频、屏幕采集。</li>
+        <li><code>/session/stop</code>，让服务端关 TurnController 和 MMPG。</li>
+        <li><code>leaveRoom()</code> 并销毁 RTC engine。</li>
+        <li>页面卸载用 <code>sendBeacon</code> 兜底。</li>
+      </ol>
+    </section>
+    <section>
+      <h2>前端排障</h2>
+      <ul>
+        <li>无声音：检查麦克风权限、自动播放失败、远端音频订阅。</li>
+        <li>无欢迎语：检查一次 <code>client.ready</code>、Agent UserId 匹配、3 秒兜底。</li>
+        <li>无字幕：看 <code>onRoomBinaryMessageReceived</code> 和 <code>subv</code> 解析。</li>
+        <li>挂断残留：看 <code>/session/stop</code> 与 <code>/health.activeCalls</code>。</li>
+      </ul>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="../lessons/0004-frontend-rtc-custom-messages.html">第 4 课</a> · <a href="pipeline-cheatsheet.html">全流程速查表</a></p>
+    </footer>
+  </main>
+</body>
+</html>

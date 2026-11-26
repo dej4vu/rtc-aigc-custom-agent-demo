@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 6 课：端到端验收与排障</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <style>
+    .delivery-drill { padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Lesson 006</p>
+      <h1>从“能跑”到“可交付”</h1>
+      <p class="lede">前五课拆开了七层链路。这一课把它们重新压缩成一个开发循环：静态健康 → 外部凭证 → 网关参数 → 自动化行为 → 真实浏览器 → 清理。</p>
+    </header>
+    <section>
+      <h2>你将获得的小胜利</h2>
+      <p>你能在一次改动后按固定漏斗验收，并用 Trace 停住的位置判断故障属于哪一层，而不是凭感觉重启或乱改配置。</p>
+    </section>
+    <section>
+      <h2>为什么顺序不能乱？</h2>
+      <p>真实故障最容易被错误观察放大。如果服务都没健康就去浏览器试音，你会同时怀疑前端、RTC、MMPG、LLM 和 TTS。反过来，外部依赖全部确认后再进浏览器，任何失败就只剩你的改动和集成边界。所以先做便宜的确定性检查，再做贵的真实链路。</p>
+    </section>
+    <section class="delivery-drill">
+      <h2>验收漏斗训练</h2>
+      <p class="drill-output">按从左到右、可自动化的顺序点击。</p>
+      <div class="drill-question"></div>
+      <div class="drill-log"></div>
+    </section>
+    <section>
+      <h2>当前仓库的真实基线</h2>
+      <p>我在本课准备时重新运行了自动化测试：</p>
+      <pre><code>yarn --cwd server test
+# 37 passed, 0 failed
+CI=true yarn --cwd web test --runInBand
+# 4 suites passed, 16 tests passed</code></pre>
+      <p>这个数字不是永远契约；它是今天的已知基线。你改代码后应比较差异：通过数量为什么变化？新增测试是否覆盖新行为？旧测试失败是否暴露真实回归？</p>
+    </section>
+    <section>
+      <h2>六层验收命令</h2>
+      <ol>
+        <li><code>curl -s http://127.0.0.1:3101/health</code>：看 <code>ok=true</code>、<code>issues=[]</code>、<code>activeCalls</code>。</li>
+        <li><code>yarn preflight</code>：验证配置、AK/SK、Bot。加 <code>-- --handshake</code> 可只验签名握手。</li>
+        <li><code>yarn probe</code>：真实创建一次 MMPG session，确认 ASR 参数和 RTC 身份。</li>
+        <li><code>yarn test</code>：同时跑服务端和前端行为规格。</li>
+        <li><code>yarn --cwd web build</code>：确认生产构建；生产路径固定为 <code>/rtc-demo/</code>。</li>
+        <li><code>yarn dev</code>：浏览器验证欢迎语、至少两轮对话、打断和显式挂断。</li>
+      </ol>
+    </section>
+    <section>
+      <h2>用 Trace 定位，而不是猜</h2>
+      <table>
+        <tr><th>最后出现的 Trace</th><th>下一步检查</th></tr>
+        <tr><td>无 <code>mmpg.session.created</code></td><td><code>yarn probe</code>；AK/SK、ASR、RTC 参数。</td></tr>
+        <tr><td>无 <code>client.ready</code></td><td>engine、agentUserId、Mic ready、Agent ready、cmsg TLV。</td></tr>
+        <tr><td>无 <code>asr.done</code></td><td>麦克风权限、isAutoPublish、ASR Key/Resource、上行音量。</td></tr>
+        <tr><td>无 <code>llm.first_token</code></td><td>Ark Key、模型、网络、AbortController 是否误触发。</td></tr>
+        <tr><td>无 <code>tts.first_chunk</code></td><td>TTS Key、speaker 授权、JSONL error、pcm/24000。</td></tr>
+        <tr><td>无 <code>playback.started</code></td><td>assistant.audio.delta、done 包、浏览器自动播放。</td></tr>
+        <tr><td>无 <code>turn.finished</code></td><td>resp_id 匹配、done 事件、finish timer。</td></tr>
+        <tr><td>挂断后 activeCalls 不为 0</td><td>/session/stop、gatewayClose、sendBeacon。</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>浏览器场景验收</h2>
+      <p>一次合格验收至少包含四个场景：</p>
+      <ol>
+        <li><strong>欢迎语：</strong>进房后 <code>client.ready</code> 恰好 1 次；字幕无标签；有音频。</li>
+        <li><strong>两轮对话：</strong>每轮都有 ASR done → LLM → TTS → playback → turn.finished。</li>
+        <li><strong>打断：</strong>AI 播放中说话；出现 <code>barge_in</code>，旧 resp_id 作废，新回复更高。</li>
+        <li><strong>清理：</strong>点挂断；MMPG 关闭；<code>activeCalls=0</code>。</li>
+      </ol>
+      <p>仓库已经留下一次真实凭证回归：<code>docs/verification.md:35</code>。你不需要重复历史结论，但要用同样标准验收自己的改动。</p>
+    </section>
+    <section>
+      <h2>变更分类：先判断风险，再选验收深度</h2>
+      <table>
+        <tr><th>改动类型</th><th>最低验收</th></tr>
+        <tr><td>提示词、场景 JSON、TTS instructions</td><td>服务端相关测试 + 浏览器一轮对话 + 字幕清洗。</td></tr>
+        <tr><td>TTS 音色、instructions、3.0 参数</td><td>TTS 测试 + probe/dev；若浏览器 403，检查音色授权。</td></tr>
+        <tr><td>session.create、ASR、RTC 身份</td><td>app 测试 + preflight + probe + 浏览器进房。</td></tr>
+        <tr><td>TurnController、resp_id、打断</td><td>turn-controller 测试 + 双 Tab 隔离 + 打断场景。</td></tr>
+        <tr><td>前端 TLV、client.ready、UI 状态</td><td>mmpg/RtcClient 测试 + 无欢迎语与字幕排障路径。</td></tr>
+      </table>
+    </section>
+    <section class="exercise">
+      <h3>检索练习</h3>
+      <p>浏览器说“有 LLM 字幕但没有声音”，在 probe 已通过、Trace 已到 <code>llm.done</code> 的前提下，第一优先检查哪组？</p>
+      <div class="options">
+        <button type="button" data-answer="wrong">先重启服务端和浏览器</button>
+        <button type="button" data-answer="right">TTS speaker 授权、JSONL error、pcm24、done 包</button>
+        <button type="button" data-answer="wrong">先改 LLM 提示词和历史长度</button>
+      </div>
+      <p class="feedback" aria-live="polite"></p>
+    </section>
+    <section class="exercise">
+      <h3>微任务：给一个改动写验收单</h3>
+      <p>假设需求是“把默认音色从撒娇学妹 3.0 换成另一个已授权音色”。请按六层漏斗写出：</p>
+      <ol>
+        <li>必须修改的配置和可能需要改的测试断言。</li>
+        <li>必须跑的命令与每层通过标准。</li>
+        <li>浏览器最低场景集。</li>
+        <li>如果浏览器 403，你的第一处理动作。</li>
+      </ol>
+      <p>同时运行完整基线：</p>
+      <pre><code>yarn test</code></pre>
+      <p>把验收单和结果发我。这是本课程的结业练习。</p>
+    </section>
+    <div class="teacher-note">
+      <strong>开发方式沉淀：</strong>你现在已经掌握的不是六个 API，而是一条实时 Agent 开发方法——先定义业务边界，再封装协议层，把流式文本与音频交给状态机，用测试锁住取消和完成语义，最后用固定漏斗交付。以后接入新模型、新 TTS 或新 RTC 平台时，沿用这个骨架。
+    </div>
+    <section class="source-box">
+      <h2>今天只读这一份主源</h2>
+      <p>读 <code>docs/verification.md:15</code>。它是本仓库的真实交付标准：自动化测试、浏览器场景、字幕时间戳、双 Tab、清理和安全边界都有记录。你的验收单只需要达到同等证据密度。</p>
+    </section>
+    <footer class="lesson-links">
+      <p><a href="0005-seedtts-emotion-protocol.html">第 5 课</a> · <a href="../reference/delivery-cheatsheet.html">交付速查表</a> · <a href="../reference/pipeline-cheatsheet.html">全流程</a></p>
+    </footer>
+    <aside class="ask">
+      <p>完成结业练习后发我验收单。之后你可以选择三个进阶方向：用 alignment 做逐字字幕；把这套链路抽象成多场景模板；或设计多轮记忆与会话恢复。</p>
+    </aside>
+  </main>
+  <script src="../assets/lesson-quiz.js"></script>
+  <script src="../assets/delivery-drill.js"></script>
+</body>
+</html>
